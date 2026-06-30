@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS public.problems (
     title VARCHAR(255) NOT NULL,
     category VARCHAR(100) NOT NULL,
     difficulty VARCHAR(50) NOT NULL,
+    description TEXT,
     leetcode_url TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
