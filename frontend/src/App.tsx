@@ -19,6 +19,7 @@ import {
   Activity
 } from 'lucide-react';
 import { supabase } from './config/supabase';
+import { cppFoundationsChapters, placementQuestions, type Lesson } from './data/cppFoundations';
 import './App.css';
 
 interface Problem {
@@ -66,6 +67,15 @@ function App() {
 
   // Collapsible categories state (Sheet tab)
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
+
+  // Learn Tab State
+  const [activeLesson, setActiveLesson] = useState<Lesson | null>(cppFoundationsChapters[0].lessons[0]);
+  const [isPlacementTestActive, setIsPlacementTestActive] = useState(false);
+  const [placementAnswers, setPlacementAnswers] = useState<Record<number, number>>({});
+  const [placementSubmitted, setPlacementSubmitted] = useState(false);
+  const [mcqAnswerSelected, setMcqAnswerSelected] = useState<number | null>(null);
+  const [revealedSolutions, setRevealedSolutions] = useState<Record<string, boolean>>({});
+  const [completedLessons, setCompletedLessons] = useState<Record<string, boolean>>({});
 
   // Check current session
   useEffect(() => {
@@ -625,17 +635,317 @@ function App() {
             )}
 
             {currentTab === 'learn' && (
-              /* LEARN TAB PLACEHOLDER */
-              <div>
-                <h1 style={{ fontSize: '36px', marginBottom: '12px' }}>Learning Center</h1>
-                <p style={{ color: 'var(--text-secondary)', marginBottom: '40px' }}>Comprehensive guides, syllabus roadmaps, and patterns lessons</p>
-                
-                <div className="card-glass" style={{ textAlign: 'center', padding: '64px' }}>
-                  <HelpCircle size={48} style={{ color: 'var(--accent-primary)', marginBottom: '16px' }} />
-                  <h2>Under Development</h2>
-                  <p style={{ color: 'var(--text-secondary)', maxWidth: '400px', margin: '0 auto' }}>
-                    The learning syllabus and topic deep-dives are currently cooking. Check back soon for interactive tutorials!
+              /* INTERACTIVE LEARNING HUB (UNIT 0) */
+              <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '32px', height: 'calc(100vh - 120px)' }}>
+                {/* Left Navigation Sidebar */}
+                <div className="card-glass" style={{ display: 'flex', flexDirection: 'column', padding: '20px', overflowY: 'auto' }}>
+                  <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>Unit 0 — C++ Foundations</h3>
+                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+                    Language prerequisites & diagnostic test
                   </p>
+
+                  {/* Progress bar */}
+                  <div style={{ background: 'var(--border-subtle)', borderRadius: '4px', height: '6px', width: '100%', marginBottom: '24px', overflow: 'hidden' }}>
+                    <div style={{ 
+                      background: 'var(--accent-green)', 
+                      height: '100%', 
+                      width: `${(Object.keys(completedLessons).length / cppFoundationsChapters.reduce((acc, c) => acc + c.lessons.length, 0)) * 100}%`,
+                      transition: 'width 0.3s'
+                    }}></div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    {/* Placement Test Button */}
+                    <button 
+                      className={`sidebar-link ${isPlacementTestActive ? 'active' : ''}`}
+                      onClick={() => {
+                        setIsPlacementTestActive(true);
+                        setActiveLesson(null);
+                        setMcqAnswerSelected(null);
+                      }}
+                      style={{ 
+                        border: '1px solid var(--border-glow)',
+                        background: isPlacementTestActive ? 'hsla(180, 100%, 50%, 0.15)' : 'transparent',
+                        textAlign: 'left',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '10px 14px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <span style={{ fontWeight: 'bold' }}>⚡ Placement Test</span>
+                      {placementSubmitted && (
+                        <span style={{ fontSize: '11px', background: 'var(--accent-green)', padding: '2px 6px', borderRadius: '4px', color: 'white' }}>Done</span>
+                      )}
+                    </button>
+
+                    {/* Chapters List */}
+                    {cppFoundationsChapters.map(chapter => (
+                      <div key={chapter.id}>
+                        <h4 style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          {chapter.title.split(' — ')[0]}
+                        </h4>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {chapter.lessons.map(lesson => {
+                            const isSelected = activeLesson?.id === lesson.id;
+                            const isDone = completedLessons[lesson.id];
+                            return (
+                              <button
+                                key={lesson.id}
+                                className={`sidebar-link ${isSelected ? 'active' : ''}`}
+                                onClick={() => {
+                                  setIsPlacementTestActive(false);
+                                  setActiveLesson(lesson);
+                                  setMcqAnswerSelected(null);
+                                }}
+                                style={{ 
+                                  textAlign: 'left',
+                                  padding: '8px 12px',
+                                  fontSize: '13px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  background: isSelected ? 'hsla(263, 90%, 55%, 0.12)' : 'transparent',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  width: '100%',
+                                  color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)'
+                                }}
+                              >
+                                <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '180px' }}>
+                                  {lesson.title.split(' — ')[1]}
+                                </span>
+                                {isDone && <span style={{ color: 'var(--accent-green)', fontSize: '12px' }}>✓</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Right Content Viewport */}
+                <div className="card-glass" style={{ padding: '32px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+                  {isPlacementTestActive ? (
+                    /* RENDER PLACEMENT TEST */
+                    <div>
+                      <h2 style={{ fontSize: '28px', marginBottom: '8px' }}>⚡ Unit 0 Diagnostic Placement Test</h2>
+                      <p style={{ color: 'var(--text-secondary)', marginBottom: '32px', fontSize: '14px' }}>
+                        Answer these C++ prerequisite questions. Score <strong>5 / 6</strong> correct to skip Unit 0 and proceed directly to data structures.
+                      </p>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', marginBottom: '32px' }}>
+                        {placementQuestions.map((q, idx) => {
+                          const selectedOpt = placementAnswers[q.id];
+                          return (
+                            <div key={q.id} style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: '20px' }}>
+                              <h4 style={{ fontSize: '15px', marginBottom: '12px', color: 'var(--text-primary)', fontWeight: '600' }}>
+                                {idx + 1}. {q.question}
+                              </h4>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                {q.options.map((opt, optIdx) => {
+                                  const isOptionSelected = selectedOpt === optIdx;
+                                  let btnBg = 'hsla(224, 71%, 12%, 0.5)';
+                                  let btnBorder = 'var(--border-subtle)';
+                                  
+                                  if (placementSubmitted) {
+                                    if (optIdx === q.answerIndex) {
+                                      btnBg = 'hsla(142, 70%, 50%, 0.15)';
+                                      btnBorder = 'var(--accent-green)';
+                                    } else if (isOptionSelected) {
+                                      btnBg = 'hsla(340, 100%, 60%, 0.15)';
+                                      btnBorder = 'var(--accent-rose)';
+                                    }
+                                  } else if (isOptionSelected) {
+                                    btnBg = 'hsla(263, 90%, 55%, 0.2)';
+                                    btnBorder = 'var(--accent-primary)';
+                                  }
+
+                                  return (
+                                    <button
+                                      key={optIdx}
+                                      disabled={placementSubmitted}
+                                      onClick={() => setPlacementAnswers(prev => ({ ...prev, [q.id]: optIdx }))}
+                                      style={{
+                                        background: btnBg,
+                                        border: `1px solid ${btnBorder}`,
+                                        borderRadius: '8px',
+                                        padding: '12px 16px',
+                                        color: 'var(--text-primary)',
+                                        textAlign: 'left',
+                                        cursor: placementSubmitted ? 'default' : 'pointer',
+                                        fontSize: '13px',
+                                        transition: 'all 0.2s'
+                                      }}
+                                    >
+                                      {opt}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {placementSubmitted && (
+                                <div style={{ marginTop: '12px', fontSize: '13px', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.02)', padding: '10px 14px', borderRadius: '6px' }}>
+                                  <strong>Correct Answer: {q.answerLabel}</strong> — {q.explanation}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {placementSubmitted ? (
+                        <div className="card-glass" style={{ textAlign: 'center', background: 'rgba(255,255,255,0.03)', padding: '24px' }}>
+                          <h3 style={{ fontSize: '20px', marginBottom: '8px' }}>
+                            Diagnostic Score: {Object.values(placementAnswers).filter((ans, idx) => ans === placementQuestions[idx].answerIndex).length} / 6 Correct
+                          </h3>
+                          <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '16px' }}>
+                            {Object.values(placementAnswers).filter((ans, idx) => ans === placementQuestions[idx].answerIndex).length >= 5 
+                              ? '🏆 Perfect match! You have verified C++ skills. Skip Unit 0 and proceed straight to Unit 1.' 
+                              : '💡 Recommended: review C++ Foundations lessons before proceeding to avoid syntax blocks.'
+                            }
+                          </p>
+                          <button 
+                            className="btn-secondary"
+                            onClick={() => {
+                              setPlacementAnswers({});
+                              setPlacementSubmitted(false);
+                            }}
+                          >
+                            Retake Diagnostic Test
+                          </button>
+                        </div>
+                      ) : (
+                        <button 
+                          className="btn-primary" 
+                          onClick={() => {
+                            if (Object.keys(placementAnswers).length < placementQuestions.length) {
+                              alert('Please complete all questions before submitting.');
+                              return;
+                            }
+                            setPlacementSubmitted(true);
+                          }}
+                          style={{ width: '100%' }}
+                        >
+                          Submit Test
+                        </button>
+                      )}
+                    </div>
+                  ) : activeLesson ? (
+                    /* RENDER ACTIVE LESSON */
+                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                      <h2 style={{ fontSize: '28px', marginBottom: '24px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '16px' }}>
+                        {activeLesson.title}
+                      </h2>
+                      
+                      <div className="lesson-body-text" style={{ display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '15px', lineHeight: '1.7', color: '#e2e8f0', flexGrow: 1 }}>
+                        {activeLesson.content.map((paragraph, pIdx) => (
+                          <div key={pIdx} dangerouslySetInnerHTML={{ __html: paragraph }} />
+                        ))}
+
+                        {/* RENDER MCQ IF EXISTS */}
+                        {activeLesson.mcq && (
+                          <div className="card-glass" style={{ background: 'hsla(224, 71%, 6%, 0.4)', border: '1px solid var(--border-subtle)', padding: '24px', borderRadius: '8px', marginTop: '24px' }}>
+                            <h4 style={{ fontSize: '15px', color: 'var(--accent-cyan)', marginBottom: '16px', marginTop: '0' }}>
+                              ❓ Check Your Understanding
+                            </h4>
+                            <p style={{ fontWeight: '600', marginBottom: '16px', color: 'var(--text-primary)', fontSize: '14px' }}>{activeLesson.mcq.question}</p>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {activeLesson.mcq.options.map((opt, optIdx) => {
+                                const isCorrect = optIdx === activeLesson.mcq!.answerIndex;
+                                const isSelected = mcqAnswerSelected === optIdx;
+                                let optBorder = 'var(--border-subtle)';
+                                let optBg = 'transparent';
+                                
+                                if (mcqAnswerSelected !== null) {
+                                  if (isCorrect) {
+                                    optBorder = 'var(--accent-green)';
+                                    optBg = 'rgba(142, 70, 50, 0.08)';
+                                  } else if (isSelected) {
+                                    optBorder = 'var(--accent-rose)';
+                                    optBg = 'rgba(340, 100, 60, 0.08)';
+                                  }
+                                }
+
+                                return (
+                                  <button
+                                    key={optIdx}
+                                    onClick={() => setMcqAnswerSelected(optIdx)}
+                                    style={{
+                                      background: optBg,
+                                      border: `1px solid ${optBorder}`,
+                                      borderRadius: '6px',
+                                      padding: '10px 14px',
+                                      color: 'var(--text-primary)',
+                                      textAlign: 'left',
+                                      cursor: 'pointer',
+                                      fontSize: '13px',
+                                      transition: 'all 0.2s'
+                                    }}
+                                  >
+                                    {opt}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            {mcqAnswerSelected !== null && (
+                              <div style={{ marginTop: '16px', fontSize: '13px', color: 'var(--text-secondary)', borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
+                                <strong>Explanation:</strong> {activeLesson.mcq.explanation}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* RENDER CODE EXERCISE IF EXISTS */}
+                        {activeLesson.codeExercise && (
+                          <div className="card-glass" style={{ background: 'hsla(224, 71%, 6%, 0.4)', border: '1px solid var(--border-subtle)', padding: '24px', borderRadius: '8px', marginTop: '24px' }}>
+                            <h4 style={{ fontSize: '15px', color: 'var(--accent-amber)', marginBottom: '12px', marginTop: '0' }}>
+                              💻 Hands-On Exercise
+                            </h4>
+                            <p style={{ fontSize: '14px', color: 'var(--text-primary)', marginBottom: '16px' }}>
+                              {activeLesson.codeExercise.instruction}
+                            </p>
+                            <pre><code style={{ fontSize: '13px' }}>{activeLesson.codeExercise.templateCode}</code></pre>
+                            
+                            <div style={{ marginTop: '16px' }}>
+                              <button 
+                                className="btn-secondary" 
+                                onClick={() => setRevealedSolutions(prev => ({ ...prev, [activeLesson.id]: !prev[activeLesson.id] }))}
+                                style={{ fontSize: '12px', padding: '6px 12px' }}
+                              >
+                                {revealedSolutions[activeLesson.id] ? 'Hide Solution' : 'Reveal Solution'}
+                              </button>
+                            </div>
+
+                            {revealedSolutions[activeLesson.id] && (
+                              <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px solid var(--border-subtle)', paddingTop: '16px' }}>
+                                <strong>Solution Code:</strong>
+                                <pre><code style={{ fontSize: '13px', color: 'var(--accent-green)' }}>{activeLesson.codeExercise.solutionCode}</code></pre>
+                                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+                                  <strong>Concept:</strong> {activeLesson.codeExercise.explanation}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* LESSON COMPLETE BUTTON */}
+                      <div style={{ marginTop: '40px', borderTop: '1px solid var(--border-subtle)', paddingTop: '20px', display: 'flex', justifyItems: 'center', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                          Unit 0 — Lesson {activeLesson.id}
+                        </span>
+                        <button
+                          className={completedLessons[activeLesson.id] ? 'btn-secondary' : 'btn-primary'}
+                          onClick={() => setCompletedLessons(prev => ({ ...prev, [activeLesson.id]: !prev[activeLesson.id] }))}
+                          style={{ padding: '8px 16px', fontSize: '13px' }}
+                        >
+                          {completedLessons[activeLesson.id] ? '✓ Completed' : 'Mark Lesson Complete'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             )}
