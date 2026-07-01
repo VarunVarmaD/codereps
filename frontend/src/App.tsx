@@ -58,6 +58,7 @@ function App() {
   // Active Practice State
   const [activeProblem, setActiveProblem] = useState<Problem | null>(null);
   const [ratingLoading, setRatingLoading] = useState(false);
+  const [workspaceTab, setWorkspaceTab] = useState<'leetcode' | 'sandbox'>('leetcode');
 
   // Stopwatch Timer State
   const [timeElapsed, setTimeElapsed] = useState(0);
@@ -172,9 +173,10 @@ function App() {
       if (!response.ok) throw new Error('Failed to retrieve problem description');
       const detailedProblem = await response.json();
       
-      // Initialize stopwatch state
+      // Initialize stopwatch and sub-tabs state
       setTimeElapsed(0);
       setIsTimerRunning(false);
+      setWorkspaceTab('leetcode');
       setActiveProblem(detailedProblem);
     } catch (err: any) {
       alert(err.message || 'Failed to open problem workspace');
@@ -201,7 +203,7 @@ function App() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ grade })
+        body: JSON.stringify({ grade, durationSeconds: timeElapsed })
       });
       if (!response.ok) throw new Error('Failed to save review results');
       
@@ -401,7 +403,7 @@ function App() {
             </div>
 
             <div className="workspace-container">
-              {/* Left Pane - LeetCode problem description */}
+              {/* Left Pane - Problem Description */}
               <div className="workspace-pane">
                 <h3 style={{ fontSize: '18px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '12px', marginTop: '0' }}>
                   Problem Description
@@ -413,60 +415,116 @@ function App() {
                 />
               </div>
 
-              {/* Right Pane - Grading and Stopwatch Timer */}
-              <div className="workspace-pane" style={{ justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-                <Clock size={48} style={{ color: isTimerRunning ? 'var(--accent-cyan)' : 'var(--text-muted)', marginBottom: '12px', transition: 'color 0.3s' }} />
+              {/* Right Pane - Practice Session with Workspace Tabs */}
+              <div className="workspace-pane" style={{ display: 'flex', flexDirection: 'column' }}>
                 
-                {/* Timer Display */}
-                <div style={{ fontFamily: 'var(--font-code)', fontSize: '42px', fontWeight: 'bold', letterSpacing: '0.05em', color: isTimerRunning ? 'var(--accent-cyan)' : 'var(--text-primary)', marginBottom: '16px' }}>
-                  {formatTime(timeElapsed)}
-                </div>
-
-                <div style={{ display: 'flex', gap: '12px', marginBottom: '40px' }}>
+                {/* Small Workspace Navbar Tabs */}
+                <div style={{ display: 'flex', borderBottom: '1px solid var(--border-subtle)', marginBottom: '24px' }}>
                   <button 
-                    onClick={handleOpenLeetCode} 
-                    className="btn-primary" 
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}
+                    className={`sidebar-link`}
+                    onClick={() => setWorkspaceTab('leetcode')}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      borderBottom: workspaceTab === 'leetcode' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                      color: workspaceTab === 'leetcode' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      padding: '10px 16px',
+                      cursor: 'pointer',
+                      fontWeight: '600',
+                      fontSize: '14px',
+                      borderRadius: '0'
+                    }}
                   >
-                    Solve on LeetCode <ExternalLink size={16} />
+                    Practice on LeetCode
                   </button>
-                  {isTimerRunning && (
-                    <button 
-                      onClick={() => setIsTimerRunning(false)} 
-                      className="btn-secondary"
-                      style={{ padding: '10px 14px' }}
-                    >
-                      <Pause size={16} />
-                    </button>
-                  )}
+                  <button 
+                    className={`sidebar-link`}
+                    onClick={() => setWorkspaceTab('sandbox')}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      borderBottom: workspaceTab === 'sandbox' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                      color: workspaceTab === 'sandbox' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      padding: '10px 16px',
+                      cursor: 'pointer',
+                      fontWeight: '600',
+                      fontSize: '14px',
+                      borderRadius: '0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}
+                  >
+                    Do it here <span style={{ fontSize: '9px', background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border-subtle)', padding: '1px 6px', borderRadius: '4px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Soon</span>
+                  </button>
                 </div>
 
-                <div style={{ borderTop: '1px solid var(--border-subtle)', width: '100%', paddingTop: '32px' }}>
-                  <h4 style={{ fontSize: '15px', color: 'var(--text-secondary)', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Rate your recall quality
-                  </h4>
-                  <div className="grade-buttons">
-                    {[
-                      { val: 1, label: 'Again', desc: 'Forgot' },
-                      { val: 2, label: 'Hard', desc: 'Slow' },
-                      { val: 3, label: 'Good', desc: 'Okay' },
-                      { val: 4, label: 'Easy', desc: 'Sleek' },
-                      { val: 5, label: 'Perfect', desc: 'Instant' }
-                    ].map(g => (
-                      <button 
-                        key={g.val}
-                        className="btn-grade" 
-                        onClick={() => handleSubmitReview(g.val)}
-                        disabled={ratingLoading}
-                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', padding: '10px 4px' }}
-                      >
-                        <span style={{ fontSize: '14px' }}>{g.val}</span>
-                        <span style={{ fontSize: '11px', color: 'white' }}>{g.label}</span>
-                        <span style={{ fontSize: '9px', color: 'var(--text-muted)', fontWeight: 'normal' }}>{g.desc}</span>
-                      </button>
-                    ))}
+                {workspaceTab === 'sandbox' ? (
+                  /* SANDBOX PLACEHOLDER */
+                  <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: '40px 20px' }}>
+                    <Clock size={40} style={{ color: 'var(--text-muted)', marginBottom: '16px' }} />
+                    <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>Interactive Code Playground</h3>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '14px', maxWidth: '320px', margin: '0 auto', lineHeight: '1.5' }}>
+                      An in-browser code editor and compiler sandbox is currently cooking. Soon you will be able to write and execute code solutions directly on this screen!
+                    </p>
                   </div>
-                </div>
+                ) : (
+                  /* LEETCODE PRACTICE VIEW */
+                  <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
+                    <Clock size={48} style={{ color: isTimerRunning ? 'var(--accent-cyan)' : 'var(--text-muted)', marginBottom: '12px', transition: 'color 0.3s' }} />
+                    
+                    {/* Timer Display */}
+                    <div style={{ fontFamily: 'var(--font-code)', fontSize: '42px', fontWeight: 'bold', letterSpacing: '0.05em', color: isTimerRunning ? 'var(--accent-cyan)' : 'var(--text-primary)', marginBottom: '16px' }}>
+                      {formatTime(timeElapsed)}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '12px', marginBottom: '40px' }}>
+                      <button 
+                        onClick={handleOpenLeetCode} 
+                        className="btn-primary" 
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}
+                      >
+                        Solve on LeetCode <ExternalLink size={16} />
+                      </button>
+                      {isTimerRunning && (
+                        <button 
+                          onClick={() => setIsTimerRunning(false)} 
+                          className="btn-secondary"
+                          style={{ padding: '10px 14px' }}
+                        >
+                          <Pause size={16} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ borderTop: '1px solid var(--border-subtle)', width: '100%', paddingTop: '24px' }}>
+                      <h4 style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Rate your recall quality
+                      </h4>
+                      <div className="grade-buttons">
+                        {[
+                          { val: 0, label: '0', title: 'Blackout', desc: 'No memory' },
+                          { val: 1, label: '1', title: 'Familiar', desc: 'Recognized' },
+                          { val: 2, label: '2', title: 'Struggled', desc: 'Needed hints' },
+                          { val: 3, label: '3', title: 'Solved', desc: 'Correct, rough' },
+                          { val: 4, label: '4', title: 'Fluent', desc: 'Clean, fast' }
+                        ].map(g => (
+                          <button 
+                            key={g.val}
+                            className="btn-grade" 
+                            onClick={() => handleSubmitReview(g.val)}
+                            disabled={ratingLoading}
+                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', padding: '10px 2px' }}
+                          >
+                            <span style={{ fontSize: '13px' }}>{g.label}</span>
+                            <span style={{ fontSize: '10px', color: 'white', fontWeight: 'bold' }}>{g.title}</span>
+                            <span style={{ fontSize: '8px', color: 'var(--text-muted)', fontWeight: 'normal' }}>{g.desc}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
