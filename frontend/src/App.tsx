@@ -12,7 +12,11 @@ import {
   Play, 
   Mail, 
   Lock,
-  RefreshCw
+  RefreshCw,
+  Clock,
+  Pause,
+  HelpCircle,
+  Activity
 } from 'lucide-react';
 import { supabase } from './config/supabase';
 import './App.css';
@@ -29,14 +33,15 @@ interface Problem {
   repetition_count: number | null;
   due_at: string | null;
   enabled: boolean | null;
-  status: 'New' | 'Learning' | 'Review' | 'Mastered';
+  status: 'Untracked' | 'Learning' | 'Review' | 'Mastered';
   due: boolean;
+  days_left: number | null;
 }
 
 function App() {
   const [session, setSession] = useState<any>(null);
   const [isBypassed, setIsBypassed] = useState(false);
-  const [currentTab, setCurrentTab] = useState<'dashboard' | 'curriculum'>('dashboard');
+  const [currentTab, setCurrentTab] = useState<'dashboard' | 'learn' | 'tracked' | 'sheet'>('dashboard');
   
   // Auth Form State
   const [email, setEmail] = useState('');
@@ -54,7 +59,11 @@ function App() {
   const [activeProblem, setActiveProblem] = useState<Problem | null>(null);
   const [ratingLoading, setRatingLoading] = useState(false);
 
-  // Collapsible categories state
+  // Stopwatch Timer State
+  const [timeElapsed, setTimeElapsed] = useState(0);
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+
+  // Collapsible categories state (Sheet tab)
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
 
   // Check current session
@@ -98,6 +107,19 @@ function App() {
     fetchProblems();
   }, [session, isBypassed]);
 
+  // Stopwatch Timer Effect
+  useEffect(() => {
+    let interval: any = null;
+    if (isTimerRunning) {
+      interval = setInterval(() => {
+        setTimeElapsed(prev => prev + 1);
+      }, 1000);
+    } else {
+      clearInterval(interval);
+    }
+    return () => clearInterval(interval);
+  }, [isTimerRunning]);
+
   // Auth execution handler
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,7 +160,6 @@ function App() {
 
   // Open single problem practice workspace
   const handleStartPractice = async (problem: Problem) => {
-    // Fetch problem details including description
     setDataLoading(true);
     try {
       const token = isBypassed ? 'development_bypass_token' : session?.access_token;
@@ -150,12 +171,22 @@ function App() {
       });
       if (!response.ok) throw new Error('Failed to retrieve problem description');
       const detailedProblem = await response.json();
+      
+      // Initialize stopwatch state
+      setTimeElapsed(0);
+      setIsTimerRunning(false);
       setActiveProblem(detailedProblem);
     } catch (err: any) {
       alert(err.message || 'Failed to open problem workspace');
     } finally {
       setDataLoading(false);
     }
+  };
+
+  // Click handler for opening LeetCode & starting timer
+  const handleOpenLeetCode = () => {
+    setIsTimerRunning(true);
+    window.open(activeProblem?.leetcode_url, '_blank');
   };
 
   // Submit SM-2 recall rating
@@ -174,6 +205,10 @@ function App() {
       });
       if (!response.ok) throw new Error('Failed to save review results');
       
+      // Stop timer
+      setIsTimerRunning(false);
+      setTimeElapsed(0);
+
       // Reload problems list to refresh dashboard
       await fetchProblems();
       setActiveProblem(null);
@@ -184,7 +219,7 @@ function App() {
     }
   };
 
-  // Group problems by category for Curriculum tab
+  // Group problems by category for Sheet tab
   const getProblemsByCategory = () => {
     const groups: Record<string, Problem[]> = {};
     problems.forEach(p => {
@@ -201,8 +236,16 @@ function App() {
     }));
   };
 
-  // Filtering dashboard problems (only due or learning problems)
+  // Format seconds to MM:SS
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Calculations for display queues
   const dueQueue = problems.filter(p => p.due);
+  const trackedProblems = problems.filter(p => p.status !== 'Untracked');
 
   // Statistics computations
   const totalMastered = problems.filter(p => p.status === 'Mastered').length;
@@ -306,13 +349,25 @@ function App() {
             className={`sidebar-link ${currentTab === 'dashboard' ? 'active' : ''}`}
             onClick={() => { setCurrentTab('dashboard'); setActiveProblem(null); }}
           >
-            <LayoutDashboard size={18} /> Today Dashboard
+            <LayoutDashboard size={18} /> Today
           </div>
           <div 
-            className={`sidebar-link ${currentTab === 'curriculum' ? 'active' : ''}`}
-            onClick={() => { setCurrentTab('curriculum'); setActiveProblem(null); }}
+            className={`sidebar-link ${currentTab === 'learn' ? 'active' : ''}`}
+            onClick={() => { setCurrentTab('learn'); setActiveProblem(null); }}
           >
-            <BookOpen size={18} /> Curriculum
+            <HelpCircle size={18} /> Learn
+          </div>
+          <div 
+            className={`sidebar-link ${currentTab === 'tracked' ? 'active' : ''}`}
+            onClick={() => { setCurrentTab('tracked'); setActiveProblem(null); }}
+          >
+            <Activity size={18} /> Tracked
+          </div>
+          <div 
+            className={`sidebar-link ${currentTab === 'sheet' ? 'active' : ''}`}
+            onClick={() => { setCurrentTab('sheet'); setActiveProblem(null); }}
+          >
+            <BookOpen size={18} /> Sheet
           </div>
         </nav>
 
@@ -329,8 +384,8 @@ function App() {
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
               <div>
-                <span className="sidebar-email" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setActiveProblem(null)}>
-                  &larr; Back to Dashboard
+                <span className="sidebar-email" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => { setActiveProblem(null); setIsTimerRunning(false); }}>
+                  &larr; Exit Workspace
                 </span>
                 <h2 style={{ fontSize: '28px', marginTop: '8px', marginBottom: '0' }}>{activeProblem.title}</h2>
               </div>
@@ -358,22 +413,33 @@ function App() {
                 />
               </div>
 
-              {/* Right Pane - Grading and Practice Instructions */}
+              {/* Right Pane - Grading and Stopwatch Timer */}
               <div className="workspace-pane" style={{ justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-                <h3 style={{ fontSize: '22px', marginBottom: '12px' }}>Practice Session</h3>
-                <p style={{ color: 'var(--text-secondary)', maxWidth: '340px', marginBottom: '32px', fontSize: '14px' }}>
-                  Solve the problem on LeetCode's playground. When completed, rate your recall quality below to schedule your next repeat interval.
-                </p>
+                <Clock size={48} style={{ color: isTimerRunning ? 'var(--accent-cyan)' : 'var(--text-muted)', marginBottom: '12px', transition: 'color 0.3s' }} />
+                
+                {/* Timer Display */}
+                <div style={{ fontFamily: 'var(--font-code)', fontSize: '42px', fontWeight: 'bold', letterSpacing: '0.05em', color: isTimerRunning ? 'var(--accent-cyan)' : 'var(--text-primary)', marginBottom: '16px' }}>
+                  {formatTime(timeElapsed)}
+                </div>
 
-                <a 
-                  href={activeProblem.leetcode_url} 
-                  target="_blank" 
-                  rel="noreferrer" 
-                  className="btn-primary" 
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none', marginBottom: '48px' }}
-                >
-                  Solve on LeetCode <ExternalLink size={16} />
-                </a>
+                <div style={{ display: 'flex', gap: '12px', marginBottom: '40px' }}>
+                  <button 
+                    onClick={handleOpenLeetCode} 
+                    className="btn-primary" 
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}
+                  >
+                    Solve on LeetCode <ExternalLink size={16} />
+                  </button>
+                  {isTimerRunning && (
+                    <button 
+                      onClick={() => setIsTimerRunning(false)} 
+                      className="btn-secondary"
+                      style={{ padding: '10px 14px' }}
+                    >
+                      <Pause size={16} />
+                    </button>
+                  )}
+                </div>
 
                 <div style={{ borderTop: '1px solid var(--border-subtle)', width: '100%', paddingTop: '32px' }}>
                   <h4 style={{ fontSize: '15px', color: 'var(--text-secondary)', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -407,13 +473,13 @@ function App() {
         ) : (
           /* NORMAL TAB SWITCHING */
           <div>
-            {currentTab === 'dashboard' ? (
+            {currentTab === 'dashboard' && (
               /* TODAY DASHBOARD VIEW */
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
                   <div>
                     <h1 style={{ fontSize: '36px', margin: '0' }}>Today Dashboard</h1>
-                    <p style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>Your Spaced Repetition queue for today</p>
+                    <p style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>Your active review items for today</p>
                   </div>
                   <button className="btn-secondary" onClick={fetchProblems} disabled={dataLoading}>
                     <RefreshCw size={16} className={dataLoading ? 'spin-animation' : ''} />
@@ -425,7 +491,7 @@ function App() {
                   <div className="card-glass">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-cyan)' }}>
                       <Calendar size={18} />
-                      <span style={{ fontSize: '13px', fontWeight: '600', textTransform: 'uppercase' }}>due review</span>
+                      <span style={{ fontSize: '13px', fontWeight: '600', textTransform: 'uppercase' }}>due today</span>
                     </div>
                     <p className="stat-val" style={{ color: 'var(--accent-cyan)' }}>{dueQueue.length}</p>
                   </div>
@@ -459,12 +525,12 @@ function App() {
                 )}
 
                 {/* Active Review Problems List */}
-                <h2 style={{ fontSize: '22px', marginBottom: '20px' }}>Active Spaced Repetition Queue</h2>
+                <h2 style={{ fontSize: '22px', marginBottom: '20px' }}>Spaced Repetition Due Queue</h2>
                 {dueQueue.length === 0 ? (
                   <div className="card-glass" style={{ textAlign: 'center', padding: '48px' }}>
                     <CheckCircle2 size={40} style={{ color: 'var(--accent-green)', marginBottom: '12px' }} />
                     <h3>All caught up!</h3>
-                    <p style={{ color: 'var(--text-secondary)' }}>You have zero problems due for review today. Go to the Curriculum tab to practice new topics.</p>
+                    <p style={{ color: 'var(--text-secondary)' }}>You have zero problems due for review today. Go to the **Sheet** tab to practice new topics.</p>
                   </div>
                 ) : (
                   <div className="problems-grid">
@@ -498,15 +564,113 @@ function App() {
                   </div>
                 )}
               </div>
-            ) : (
-              /* CURRICULUM VIEW */
+            )}
+
+            {currentTab === 'learn' && (
+              /* LEARN TAB PLACEHOLDER */
               <div>
-                <h1 style={{ fontSize: '36px', marginBottom: '12px' }}>Curriculum Map</h1>
-                <p style={{ color: 'var(--text-secondary)', marginBottom: '32px' }}>Detailed roadmap of all 250 problems grouped by tags</p>
+                <h1 style={{ fontSize: '36px', marginBottom: '12px' }}>Learning Center</h1>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: '40px' }}>Comprehensive guides, syllabus roadmaps, and patterns lessons</p>
+                
+                <div className="card-glass" style={{ textAlign: 'center', padding: '64px' }}>
+                  <HelpCircle size={48} style={{ color: 'var(--accent-primary)', marginBottom: '16px' }} />
+                  <h2>Under Development</h2>
+                  <p style={{ color: 'var(--text-secondary)', maxWidth: '400px', margin: '0 auto' }}>
+                    The learning syllabus and topic deep-dives are currently cooking. Check back soon for interactive tutorials!
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {currentTab === 'tracked' && (
+              /* TRACKED PROBLEMS LIST */
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
+                  <div>
+                    <h1 style={{ fontSize: '36px', margin: '0' }}>Tracked Problems</h1>
+                    <p style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>All questions currently in your Spaced Repetition queue</p>
+                  </div>
+                </div>
+
+                {trackedProblems.length === 0 ? (
+                  <div className="card-glass" style={{ textAlign: 'center', padding: '48px' }}>
+                    <Activity size={40} style={{ color: 'var(--text-muted)', marginBottom: '12px' }} />
+                    <h3>No problems tracked yet</h3>
+                    <p style={{ color: 'var(--text-secondary)' }}>Practice a question from the **Sheet** tab to add it to your monitor loop.</p>
+                  </div>
+                ) : (
+                  <div className="card-glass" style={{ padding: '0', overflowX: 'auto' }}>
+                    <table className="problems-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: '30%' }}>Problem Name</th>
+                          <th style={{ width: '20%' }}>Category</th>
+                          <th style={{ width: '15%' }}>Difficulty</th>
+                          <th style={{ width: '15%' }}>Interval</th>
+                          <th style={{ width: '20%' }}>Status / Due Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {trackedProblems.map(p => {
+                          const dueInDays = p.days_left;
+                          let dueMessage = 'Due Now';
+                          let isOverdue = p.due;
+
+                          if (!isOverdue && dueInDays !== null) {
+                            if (dueInDays <= 0) {
+                              dueMessage = 'Due Now';
+                              isOverdue = true;
+                            } else if (dueInDays === 1) {
+                              dueMessage = 'In 1 day';
+                            } else {
+                              dueMessage = `In ${dueInDays} days`;
+                            }
+                          }
+
+                          return (
+                            <tr key={p.id}>
+                              <td style={{ fontWeight: '600' }}>
+                                <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => handleStartPractice(p)}>
+                                  {p.title}
+                                </span>
+                              </td>
+                              <td>{p.category}</td>
+                              <td>
+                                <span className={`tag-badge ${
+                                  p.difficulty === 'Easy' ? 'diff-easy' : 
+                                  p.difficulty === 'Medium' ? 'diff-medium' : 'diff-hard'
+                                }`}>
+                                  {p.difficulty}
+                                </span>
+                              </td>
+                              <td style={{ fontFamily: 'var(--font-code)', fontSize: '13px' }}>
+                                {p.interval_days} {p.interval_days === 1 ? 'day' : 'days'} (Reps: {p.repetition_count})
+                              </td>
+                              <td>
+                                <span className={`tag-badge ${isOverdue ? 'diff-hard' : 'tag-status'}`}>
+                                  {isOverdue ? 'Due Now' : dueMessage}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {currentTab === 'sheet' && (
+              /* SHEET VIEW (ALL 250 PROBLEMS) */
+              <div>
+                <h1 style={{ fontSize: '36px', marginBottom: '12px' }}>NeetCode 250 Sheet</h1>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: '32px' }}>Practice problems list. Submitting a grade starts active tracking.</p>
 
                 {Object.entries(getProblemsByCategory()).map(([category, items]) => {
                   const isExpanded = expandedCategories[category];
                   const completedCount = items.filter(i => i.status === 'Mastered').length;
+                  const trackedCount = items.filter(i => i.status !== 'Untracked').length;
                   
                   return (
                     <div key={category} style={{ marginBottom: '16px' }}>
@@ -516,7 +680,7 @@ function App() {
                           {category}
                         </h3>
                         <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: '600' }}>
-                          {completedCount} / {items.length} Mastered
+                          {trackedCount} / {items.length} Tracked ({completedCount} Mastered)
                         </span>
                       </div>
 
@@ -544,7 +708,13 @@ function App() {
                                     </span>
                                   </td>
                                   <td>
-                                    <span className="tag-badge tag-status">{p.status}</span>
+                                    <span className={`tag-badge ${
+                                      p.status === 'Untracked' ? 'tag-status' :
+                                      p.status === 'Learning' ? 'diff-medium' :
+                                      p.status === 'Review' ? 'diff-easy' : 'diff-green'
+                                    }`}>
+                                      {p.status}
+                                    </span>
                                   </td>
                                   <td>
                                     <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
@@ -556,7 +726,7 @@ function App() {
                                         onClick={() => handleStartPractice(p)}
                                         style={{ padding: '4px 10px', fontSize: '12px' }}
                                       >
-                                        Practice
+                                        {p.status === 'Untracked' ? 'Practice' : 'Review'}
                                       </button>
                                     </div>
                                   </td>

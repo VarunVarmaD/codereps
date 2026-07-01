@@ -24,12 +24,16 @@ router.get('/', async (req: AuthenticatedRequest, res: Response) => {
         sri.due_at, 
         sri.enabled,
         CASE 
-          WHEN sri.id IS NULL THEN 'New'
+          WHEN sri.id IS NULL THEN 'Untracked'
           WHEN sri.repetition_count = 0 THEN 'Learning'
           WHEN sri.due_at <= NOW() THEN 'Review'
           ELSE 'Mastered'
         END as status,
-        COALESCE(sri.due_at <= NOW(), TRUE) as due
+        (sri.id IS NOT NULL AND (sri.repetition_count = 0 OR sri.due_at <= NOW())) as due,
+        CASE
+          WHEN sri.id IS NULL THEN NULL
+          ELSE CEIL(EXTRACT(EPOCH FROM (sri.due_at - NOW())) / 86400.0)
+        END as days_left
       FROM public.problems p
       LEFT JOIN public.spaced_repetition_items sri 
         ON p.id = sri.problem_id AND sri.user_id = $1
@@ -65,7 +69,7 @@ router.get('/:id', async (req: AuthenticatedRequest, res: Response) => {
         sri.repetition_count, 
         sri.due_at,
         CASE 
-          WHEN sri.id IS NULL THEN 'New'
+          WHEN sri.id IS NULL THEN 'Untracked'
           WHEN sri.repetition_count = 0 THEN 'Learning'
           WHEN sri.due_at <= NOW() THEN 'Review'
           ELSE 'Mastered'
