@@ -1,26 +1,33 @@
 import { useState, useEffect } from 'react';
-import { 
-  LayoutDashboard, 
-  BookOpen, 
-  Flame, 
-  CheckCircle2, 
-  Calendar, 
-  ChevronRight, 
-  ChevronDown, 
-  LogOut, 
-  ExternalLink, 
-  Play, 
-  Mail, 
+import {
+  LayoutDashboard,
+  BookOpen,
+  CheckCircle2,
+  Calendar,
+  ChevronRight,
+  ChevronDown,
+  LogOut,
+  ExternalLink,
+  Play,
+  Mail,
   Lock,
   RefreshCw,
   Clock,
   Pause,
   HelpCircle,
-  Activity
+  Activity,
+  ArrowLeft,
+  Zap,
+  Terminal,
+  Check
 } from 'lucide-react';
 import { supabase } from './config/supabase';
 import { cppFoundationsChapters, placementQuestions, type Lesson } from './data/cppFoundations';
-import './App.css';
+
+interface ReviewEntry {
+  grade: number;
+  reviewed_at: string;
+}
 
 interface Problem {
   id: number;
@@ -37,13 +44,65 @@ interface Problem {
   status: 'Untracked' | 'Learning' | 'Review' | 'Mastered';
   due: boolean;
   days_left: number | null;
+  history?: ReviewEntry[];
+}
+
+// Confidence gauge — a radial readout of ease_factor (SM-2's 1.30-2.80 range),
+// not a decorative progress ring. Tone bands mirror difficulty/status tokens.
+function ConfidenceGauge({ easeFactor, size = 32 }: { easeFactor: number; size?: number }) {
+  const confidence = Math.max(0, Math.min(100, Math.round(((easeFactor - 1.30) / (2.80 - 1.30)) * 100)));
+  const tone = confidence < 40 ? 'tone-danger' : confidence >= 70 ? 'tone-success' : '';
+  const strokeWidth = size >= 60 ? 6 : 3;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference * (1 - confidence / 100);
+  const center = size / 2;
+
+  return (
+    <div className={`confidence-gauge ${size >= 60 ? 'confidence-gauge-lg' : ''} ${tone}`}>
+      <svg width={size} height={size}>
+        <circle className="confidence-gauge-track" cx={center} cy={center} r={radius} strokeWidth={strokeWidth} />
+        <circle
+          className="confidence-gauge-fill"
+          cx={center}
+          cy={center}
+          r={radius}
+          strokeWidth={strokeWidth}
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+        />
+      </svg>
+      <span className="confidence-gauge-value readout-value">{confidence}</span>
+    </div>
+  );
+}
+
+// Rep-history timeline — one dot per past review, oldest to newest, colored by recall grade.
+function RepTimeline({ history }: { history: ReviewEntry[] }) {
+  if (!history || history.length === 0) {
+    return <p className="rep-timeline-empty">First rep — no review history yet.</p>;
+  }
+
+  return (
+    <div className="rep-timeline">
+      <span className="readout-label rep-timeline-label">Rep history</span>
+      {history.map((entry, idx) => (
+        <span
+          key={idx}
+          className="rep-dot"
+          data-grade={entry.grade}
+          title={`Grade ${entry.grade} — ${new Date(entry.reviewed_at).toLocaleDateString()}`}
+        ></span>
+      ))}
+    </div>
+  );
 }
 
 function App() {
   const [session, setSession] = useState<any>(null);
   const [isBypassed, setIsBypassed] = useState(false);
   const [currentTab, setCurrentTab] = useState<'dashboard' | 'learn' | 'tracked' | 'sheet'>('dashboard');
-  
+
   // Auth Form State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -182,7 +241,7 @@ function App() {
       });
       if (!response.ok) throw new Error('Failed to retrieve problem description');
       const detailedProblem = await response.json();
-      
+
       // Initialize stopwatch and sub-tabs state
       setTimeElapsed(0);
       setIsTimerRunning(false);
@@ -216,7 +275,7 @@ function App() {
         body: JSON.stringify({ grade, durationSeconds: timeElapsed })
       });
       if (!response.ok) throw new Error('Failed to save review results');
-      
+
       // Stop timer
       setIsTimerRunning(false);
       setTimeElapsed(0);
@@ -268,80 +327,76 @@ function App() {
   // Render Login page if not authenticated
   if (!session && !isBypassed) {
     return (
-      <div className="auth-container">
-        <div className="card-glass auth-card">
-          <h2 style={{ textAlign: 'center', marginBottom: '8px', fontSize: '28px' }}>Codereps</h2>
-          <p style={{ textAlign: 'center', color: 'var(--text-secondary)', marginBottom: '24px', fontSize: '14px' }}>
-            Spaced Repetition coding interview tracking
+      <div className="auth-layout">
+        <div className="auth-brand-panel">
+          <h1 className="page-title">Codereps</h1>
+          <p>
+            A deliberate-practice log for DSA interviews. Track what's due, grade your
+            own recall honestly, and let spaced repetition decide what you practice next.
           </p>
+        </div>
 
-          <form onSubmit={handleAuth}>
-            <div className="auth-input-group">
-              <label className="auth-label">Email Address</label>
-              <div style={{ position: 'relative' }}>
-                <Mail size={16} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} />
-                <input 
-                  type="email" 
-                  className="auth-input" 
-                  placeholder="name@example.com" 
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  style={{ paddingLeft: '40px' }}
-                  required
-                />
+        <div className="auth-form-panel">
+          <div className="card auth-card">
+            <h2 className="auth-heading">Sign in</h2>
+            <p className="auth-subheading">Spaced repetition coding interview tracking</p>
+
+            <form onSubmit={handleAuth}>
+              <div className="auth-input-group">
+                <label className="auth-label" htmlFor="email">Email Address</label>
+                <div className="auth-input-wrap">
+                  <Mail size={16} className="auth-input-icon" />
+                  <input
+                    id="email"
+                    type="email"
+                    className="auth-input"
+                    placeholder="name@example.com"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    required
+                  />
+                </div>
               </div>
+
+              <div className="auth-input-group auth-input-group-tight">
+                <label className="auth-label" htmlFor="password">Password</label>
+                <div className="auth-input-wrap">
+                  <Lock size={16} className="auth-input-icon" />
+                  <input
+                    id="password"
+                    type="password"
+                    className="auth-input"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              {authError && <div className="auth-error">{authError}</div>}
+
+              <button type="submit" className="btn-primary btn-block" disabled={authLoading}>
+                {authLoading ? 'Verifying...' : isSignUp ? 'Create Account' : 'Sign In'}
+              </button>
+            </form>
+
+            <div className="auth-toggle">
+              <button type="button" className="link-plain" onClick={() => setIsSignUp(!isSignUp)}>
+                {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
+              </button>
             </div>
 
-            <div className="auth-input-group" style={{ marginBottom: '24px' }}>
-              <label className="auth-label">Password</label>
-              <div style={{ position: 'relative' }}>
-                <Lock size={16} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} />
-                <input 
-                  type="password" 
-                  className="auth-input" 
-                  placeholder="••••••••" 
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  style={{ paddingLeft: '40px' }}
-                  required
-                />
-              </div>
+            <div className="auth-divider">
+              <hr />
+              <span>dev sandbox</span>
+              <hr />
             </div>
 
-            {authError && (
-              <div style={{ color: 'var(--accent-rose)', fontSize: '13px', marginBottom: '16px', textAlign: 'center' }}>
-                {authError}
-              </div>
-            )}
-
-            <button type="submit" className="btn-primary" style={{ width: '100%', marginBottom: '16px' }} disabled={authLoading}>
-              {authLoading ? 'Verifying...' : isSignUp ? 'Create Account' : 'Sign In'}
+            <button type="button" className="btn-secondary btn-block btn-icon" onClick={handleBypassLogin}>
+              <Play size={16} /> Instant Developer Bypass
             </button>
-          </form>
-
-          <div style={{ textAlign: 'center', fontSize: '13px', color: 'var(--text-muted)' }}>
-            <span 
-              style={{ cursor: 'pointer', color: 'var(--text-secondary)', textDecoration: 'underline' }}
-              onClick={() => setIsSignUp(!isSignUp)}
-            >
-              {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
-            </span>
           </div>
-
-          <div style={{ margin: '24px 0 16px', display: 'flex', alignItems: 'center', justifyItems: 'center' }}>
-            <hr style={{ flexGrow: 1, borderColor: 'var(--border-subtle)' }} />
-            <span style={{ padding: '0 12px', fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>dev sandbox</span>
-            <hr style={{ flexGrow: 1, borderColor: 'var(--border-subtle)' }} />
-          </div>
-
-          <button 
-            type="button" 
-            className="btn-secondary" 
-            onClick={handleBypassLogin} 
-            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-          >
-            <Play size={16} /> Instant Developer Bypass
-          </button>
         </div>
       </div>
     );
@@ -352,40 +407,42 @@ function App() {
       {/* Sidebar Navigation */}
       <aside className="sidebar">
         <div className="sidebar-title">
-          <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: 'var(--accent-primary)', boxShadow: '0 0 10px var(--accent-primary)' }}></div>
+          <div className="sidebar-title-dot"></div>
           Codereps
         </div>
 
         <nav className="sidebar-nav">
-          <div 
+          <button
             className={`sidebar-link ${currentTab === 'dashboard' ? 'active' : ''}`}
             onClick={() => { setCurrentTab('dashboard'); setActiveProblem(null); }}
           >
             <LayoutDashboard size={18} /> Today
-          </div>
-          <div 
+          </button>
+          <button
             className={`sidebar-link ${currentTab === 'learn' ? 'active' : ''}`}
             onClick={() => { setCurrentTab('learn'); setActiveProblem(null); }}
           >
             <HelpCircle size={18} /> Learn
-          </div>
-          <div 
+          </button>
+          <button
             className={`sidebar-link ${currentTab === 'tracked' ? 'active' : ''}`}
             onClick={() => { setCurrentTab('tracked'); setActiveProblem(null); }}
           >
             <Activity size={18} /> Tracked
-          </div>
-          <div 
+          </button>
+          <button
             className={`sidebar-link ${currentTab === 'sheet' ? 'active' : ''}`}
             onClick={() => { setCurrentTab('sheet'); setActiveProblem(null); }}
           >
             <BookOpen size={18} /> Sheet
-          </div>
+          </button>
         </nav>
 
         <div className="sidebar-profile">
           <span className="sidebar-email" title={userEmail || ''}>{userEmail}</span>
-          <LogOut size={16} className="sidebar-logout" onClick={handleLogout} />
+          <button className="sidebar-logout" onClick={handleLogout} aria-label="Log out">
+            <LogOut size={16} />
+          </button>
         </div>
       </aside>
 
@@ -394,123 +451,88 @@ function App() {
         {activeProblem ? (
           /* SPLIT PANE WORKSPACE */
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+            <div className="workspace-header">
               <div>
-                <span className="sidebar-email" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => { setActiveProblem(null); setIsTimerRunning(false); }}>
-                  &larr; Exit Workspace
-                </span>
-                <h2 style={{ fontSize: '28px', marginTop: '8px', marginBottom: '0' }}>{activeProblem.title}</h2>
+                <button className="link-plain" onClick={() => { setActiveProblem(null); setIsTimerRunning(false); }}>
+                  <ArrowLeft size={14} /> Exit Workspace
+                </button>
+                <h2>{activeProblem.title}</h2>
               </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <span className="tag-badge tag-category">{activeProblem.category}</span>
-                <span className={`tag-badge ${
-                  activeProblem.difficulty === 'Easy' ? 'diff-easy' : 
-                  activeProblem.difficulty === 'Medium' ? 'diff-medium' : 'diff-hard'
-                }`}>
+              <div className="workspace-badges">
+                <span className="tag-badge badge-category">{activeProblem.category}</span>
+                <span className="tag-badge badge-difficulty" data-difficulty={activeProblem.difficulty}>
                   {activeProblem.difficulty}
                 </span>
+                {activeProblem.ease_factor != null && (
+                  <div className="confidence-gauge-wrap">
+                    <ConfidenceGauge easeFactor={activeProblem.ease_factor} size={72} />
+                    <span className="readout-label">Confidence</span>
+                  </div>
+                )}
               </div>
             </div>
+
+            <RepTimeline history={activeProblem.history || []} />
 
             <div className="workspace-container">
               {/* Left Pane - Problem Description */}
               <div className="workspace-pane">
-                <h3 style={{ fontSize: '18px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '12px', marginTop: '0' }}>
-                  Problem Description
-                </h3>
-                <div 
-                  className="description-content" 
+                <h3 className="workspace-pane-heading">Problem Description</h3>
+                <div
+                  className="prose"
                   dangerouslySetInnerHTML={{ __html: activeProblem.description || '<p>No description available.</p>' }}
-                  style={{ fontSize: '15px', lineHeight: '1.6', color: '#e2e8f0' }}
                 />
               </div>
 
               {/* Right Pane - Practice Session with Workspace Tabs */}
-              <div className="workspace-pane" style={{ display: 'flex', flexDirection: 'column' }}>
-                
-                {/* Small Workspace Navbar Tabs */}
-                <div style={{ display: 'flex', borderBottom: '1px solid var(--border-subtle)', marginBottom: '24px' }}>
-                  <button 
-                    className={`sidebar-link`}
+              <div className="workspace-pane">
+                <div className="workspace-tabs">
+                  <button
+                    className={`workspace-tab ${workspaceTab === 'leetcode' ? 'active' : ''}`}
                     onClick={() => setWorkspaceTab('leetcode')}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      borderBottom: workspaceTab === 'leetcode' ? '2px solid var(--accent-primary)' : '2px solid transparent',
-                      color: workspaceTab === 'leetcode' ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      padding: '10px 16px',
-                      cursor: 'pointer',
-                      fontWeight: '600',
-                      fontSize: '14px',
-                      borderRadius: '0'
-                    }}
                   >
                     Practice on LeetCode
                   </button>
-                  <button 
-                    className={`sidebar-link`}
+                  <button
+                    className={`workspace-tab ${workspaceTab === 'sandbox' ? 'active' : ''}`}
                     onClick={() => setWorkspaceTab('sandbox')}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      borderBottom: workspaceTab === 'sandbox' ? '2px solid var(--accent-primary)' : '2px solid transparent',
-                      color: workspaceTab === 'sandbox' ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      padding: '10px 16px',
-                      cursor: 'pointer',
-                      fontWeight: '600',
-                      fontSize: '14px',
-                      borderRadius: '0',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px'
-                    }}
                   >
-                    Do it here <span style={{ fontSize: '9px', background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border-subtle)', padding: '1px 6px', borderRadius: '4px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Soon</span>
+                    Do it here <span className="soon-badge">Soon</span>
                   </button>
                 </div>
 
                 {workspaceTab === 'sandbox' ? (
                   /* SANDBOX PLACEHOLDER */
-                  <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: '40px 20px' }}>
-                    <Clock size={40} style={{ color: 'var(--text-muted)', marginBottom: '16px' }} />
-                    <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>Interactive Code Playground</h3>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '14px', maxWidth: '320px', margin: '0 auto', lineHeight: '1.5' }}>
-                      An in-browser code editor and compiler sandbox is currently cooking. Soon you will be able to write and execute code solutions directly on this screen!
+                  <div className="workspace-tab-panel workspace-tab-panel-empty">
+                    <Clock size={40} className="timer-icon" />
+                    <h3>Interactive Code Playground</h3>
+                    <p>
+                      An in-browser code editor and compiler sandbox is currently in progress.
+                      Soon you will be able to write and execute code solutions directly on this screen.
                     </p>
                   </div>
                 ) : (
                   /* LEETCODE PRACTICE VIEW */
-                  <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-                    <Clock size={48} style={{ color: isTimerRunning ? 'var(--accent-cyan)' : 'var(--text-muted)', marginBottom: '12px', transition: 'color 0.3s' }} />
-                    
-                    {/* Timer Display */}
-                    <div style={{ fontFamily: 'var(--font-code)', fontSize: '42px', fontWeight: 'bold', letterSpacing: '0.05em', color: isTimerRunning ? 'var(--accent-cyan)' : 'var(--text-primary)', marginBottom: '16px' }}>
+                  <div className="workspace-tab-panel">
+                    <Clock size={48} className={`timer-icon ${isTimerRunning ? 'running' : ''}`} />
+
+                    <div className={`timer-display readout-value ${isTimerRunning ? 'running' : ''}`}>
                       {formatTime(timeElapsed)}
                     </div>
 
-                    <div style={{ display: 'flex', gap: '12px', marginBottom: '40px' }}>
-                      <button 
-                        onClick={handleOpenLeetCode} 
-                        className="btn-primary" 
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}
-                      >
+                    <div className="workspace-actions">
+                      <button onClick={handleOpenLeetCode} className="btn-primary btn-icon">
                         Solve on LeetCode <ExternalLink size={16} />
                       </button>
                       {isTimerRunning && (
-                        <button 
-                          onClick={() => setIsTimerRunning(false)} 
-                          className="btn-secondary"
-                          style={{ padding: '10px 14px' }}
-                        >
+                        <button onClick={() => setIsTimerRunning(false)} className="btn-secondary">
                           <Pause size={16} />
                         </button>
                       )}
                     </div>
 
-                    <div style={{ borderTop: '1px solid var(--border-subtle)', width: '100%', paddingTop: '24px' }}>
-                      <h4 style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        Rate your recall quality
-                      </h4>
+                    <div className="grading-section">
+                      <h4 className="grading-heading">Rate your recall quality</h4>
                       <div className="grade-buttons">
                         {[
                           { val: 0, label: '0', title: 'Blackout', desc: 'No memory' },
@@ -519,16 +541,15 @@ function App() {
                           { val: 3, label: '3', title: 'Solved', desc: 'Correct, rough' },
                           { val: 4, label: '4', title: 'Fluent', desc: 'Clean, fast' }
                         ].map(g => (
-                          <button 
+                          <button
                             key={g.val}
-                            className="btn-grade" 
+                            className="btn-grade"
                             onClick={() => handleSubmitReview(g.val)}
                             disabled={ratingLoading}
-                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', padding: '10px 2px' }}
                           >
-                            <span style={{ fontSize: '13px' }}>{g.label}</span>
-                            <span style={{ fontSize: '10px', color: 'white', fontWeight: 'bold' }}>{g.title}</span>
-                            <span style={{ fontSize: '8px', color: 'var(--text-muted)', fontWeight: 'normal' }}>{g.desc}</span>
+                            <span>{g.label}</span>
+                            <span className="btn-grade-title">{g.title}</span>
+                            <span className="btn-grade-desc">{g.desc}</span>
                           </button>
                         ))}
                       </div>
@@ -544,85 +565,83 @@ function App() {
             {currentTab === 'dashboard' && (
               /* TODAY DASHBOARD VIEW */
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
+                <div className="page-header">
                   <div>
-                    <h1 style={{ fontSize: '36px', margin: '0' }}>Today Dashboard</h1>
-                    <p style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>Your active review items for today</p>
+                    <h1 className="page-title">Today Dashboard</h1>
+                    <p className="page-subtitle">Your active review items for today</p>
                   </div>
-                  <button className="btn-secondary" onClick={fetchProblems} disabled={dataLoading}>
+                  <button className="btn-secondary btn-icon" onClick={fetchProblems} disabled={dataLoading}>
                     <RefreshCw size={16} className={dataLoading ? 'spin-animation' : ''} />
                   </button>
                 </div>
 
                 {/* Stats Ribbon */}
                 <div className="stats-ribbon">
-                  <div className="card-glass">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-cyan)' }}>
+                  <div className="card">
+                    <div className="stat-label-row tone-primary">
                       <Calendar size={18} />
-                      <span style={{ fontSize: '13px', fontWeight: '600', textTransform: 'uppercase' }}>due today</span>
+                      <span>due today</span>
                     </div>
-                    <p className="stat-val" style={{ color: 'var(--accent-cyan)' }}>{dueQueue.length}</p>
+                    <p className="stat-val readout-value tone-primary">{dueQueue.length}</p>
                   </div>
-                  <div className="card-glass">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-amber)' }}>
+                  <div className="card">
+                    <div className="stat-label-row tone-medium">
                       <RefreshCw size={18} />
-                      <span style={{ fontSize: '13px', fontWeight: '600', textTransform: 'uppercase' }}>in progress</span>
+                      <span>in progress</span>
                     </div>
-                    <p className="stat-val" style={{ color: 'var(--accent-amber)' }}>{totalLearning}</p>
+                    <p className="stat-val readout-value tone-medium">{totalLearning}</p>
                   </div>
-                  <div className="card-glass">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-primary)' }}>
-                      <Flame size={18} />
-                      <span style={{ fontSize: '13px', fontWeight: '600', textTransform: 'uppercase' }}>streak</span>
+                  <div className="card">
+                    <div className="stat-label-row">
+                      <Activity size={18} />
+                      <span>tracked</span>
                     </div>
-                    <p className="stat-val" style={{ color: 'var(--accent-primary)' }}>3 days</p>
+                    <p className="stat-val readout-value">{trackedProblems.length}</p>
                   </div>
-                  <div className="card-glass">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-green)' }}>
+                  <div className="card">
+                    <div className="stat-label-row tone-success">
                       <CheckCircle2 size={18} />
-                      <span style={{ fontSize: '13px', fontWeight: '600', textTransform: 'uppercase' }}>mastered</span>
+                      <span>mastered</span>
                     </div>
-                    <p className="stat-val" style={{ color: 'var(--accent-green)' }}>{totalMastered}</p>
+                    <p className="stat-val readout-value tone-success">{totalMastered}</p>
                   </div>
                 </div>
 
-                {problemsError && (
-                  <div style={{ background: 'hsla(340, 100%, 60%, 0.1)', border: '1px solid var(--accent-rose)', color: 'var(--accent-rose)', padding: '12px 16px', borderRadius: '8px', marginBottom: '24px' }}>
-                    {problemsError}
-                  </div>
-                )}
+                {problemsError && <div className="error-banner">{problemsError}</div>}
 
                 {/* Active Review Problems List */}
-                <h2 style={{ fontSize: '22px', marginBottom: '20px' }}>Spaced Repetition Due Queue</h2>
+                <h2 className="section-heading">Spaced Repetition Due Queue</h2>
                 {dueQueue.length === 0 ? (
-                  <div className="card-glass" style={{ textAlign: 'center', padding: '48px' }}>
-                    <CheckCircle2 size={40} style={{ color: 'var(--accent-green)', marginBottom: '12px' }} />
+                  <div className="card empty-state">
+                    <CheckCircle2 size={40} className="empty-state-icon tone-success" />
                     <h3>All caught up!</h3>
-                    <p style={{ color: 'var(--text-secondary)' }}>You have zero problems due for review today. Go to the **Sheet** tab to practice new topics.</p>
+                    <p className="page-subtitle">
+                      You have zero problems due for review today. Go to the <strong>Sheet</strong> tab to practice new topics.
+                    </p>
                   </div>
                 ) : (
                   <div className="problems-grid">
                     {dueQueue.map(p => (
-                      <div key={p.id} className="card-glass problem-card">
+                      <div key={p.id} className="card problem-card">
                         <div className="problem-card-header">
                           <h3 className="problem-title">{p.title}</h3>
-                          <span className={`tag-badge ${
-                            p.difficulty === 'Easy' ? 'diff-easy' : 
-                            p.difficulty === 'Medium' ? 'diff-medium' : 'diff-hard'
-                          }`}>
+                          <span className="tag-badge badge-difficulty" data-difficulty={p.difficulty}>
                             {p.difficulty}
                           </span>
                         </div>
-                        
+
                         <div className="tag-container">
-                          <span className="tag-badge tag-category">{p.category}</span>
-                          <span className="tag-badge tag-status">{p.status}</span>
+                          <span className="tag-badge badge-category">{p.category}</span>
+                          <span className="tag-badge badge-status" data-status={p.status}>{p.status}</span>
                         </div>
 
                         <div className="card-footer">
-                          <a href={p.leetcode_url} target="_blank" rel="noreferrer" className="btn-leetcode">
-                            LeetCode Link <ExternalLink size={14} />
-                          </a>
+                          <div className="card-footer-left">
+                            {p.ease_factor != null && <ConfidenceGauge easeFactor={p.ease_factor} />}
+                            <a href={p.leetcode_url} target="_blank" rel="noreferrer" className="btn-leetcode">
+                              LeetCode Link <ExternalLink size={14} />
+                            </a>
+                          </div>
                           <button className="btn-practice" onClick={() => handleStartPractice(p)}>
                             Practice <Play size={12} fill="white" />
                           </button>
@@ -636,87 +655,56 @@ function App() {
 
             {currentTab === 'learn' && (
               /* INTERACTIVE LEARNING HUB (UNIT 0) */
-              <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '32px', height: 'calc(100vh - 120px)' }}>
+              <div className="learn-layout">
                 {/* Left Navigation Sidebar */}
-                <div className="card-glass" style={{ display: 'flex', flexDirection: 'column', padding: '20px', overflowY: 'auto' }}>
-                  <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>Unit 0 — C++ Foundations</h3>
-                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-                    Language prerequisites & diagnostic test
-                  </p>
+                <div className="card learn-nav">
+                  <h3 className="learn-nav-heading">Unit 0 — C++ Foundations</h3>
+                  <p className="learn-nav-subheading">Language prerequisites &amp; diagnostic test</p>
 
                   {/* Progress bar */}
-                  <div style={{ background: 'var(--border-subtle)', borderRadius: '4px', height: '6px', width: '100%', marginBottom: '24px', overflow: 'hidden' }}>
-                    <div style={{ 
-                      background: 'var(--accent-green)', 
-                      height: '100%', 
-                      width: `${(Object.keys(completedLessons).length / cppFoundationsChapters.reduce((acc, c) => acc + c.lessons.length, 0)) * 100}%`,
-                      transition: 'width 0.3s'
-                    }}></div>
+                  <div className="progress-bar-track">
+                    <div
+                      className="progress-bar-fill"
+                      style={{
+                        width: `${(Object.keys(completedLessons).length / cppFoundationsChapters.reduce((acc, c) => acc + c.lessons.length, 0)) * 100}%`
+                      }}
+                    ></div>
                   </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div className="learn-nav-list">
                     {/* Placement Test Button */}
-                    <button 
-                      className={`sidebar-link ${isPlacementTestActive ? 'active' : ''}`}
+                    <button
+                      className={`sidebar-link placement-cta ${isPlacementTestActive ? 'active' : ''}`}
                       onClick={() => {
                         setIsPlacementTestActive(true);
                         setActiveLesson(null);
                         setMcqAnswerSelected(null);
                       }}
-                      style={{ 
-                        border: '1px solid var(--border-glow)',
-                        background: isPlacementTestActive ? 'hsla(180, 100%, 50%, 0.15)' : 'transparent',
-                        textAlign: 'left',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '10px 14px',
-                        cursor: 'pointer'
-                      }}
                     >
-                      <span style={{ fontWeight: 'bold' }}>⚡ Placement Test</span>
-                      {placementSubmitted && (
-                        <span style={{ fontSize: '11px', background: 'var(--accent-green)', padding: '2px 6px', borderRadius: '4px', color: 'white' }}>Done</span>
-                      )}
+                      <span className="icon-label"><Zap size={14} /> Placement Test</span>
+                      {placementSubmitted && <span className="done-badge">Done</span>}
                     </button>
 
                     {/* Chapters List */}
                     {cppFoundationsChapters.map(chapter => (
                       <div key={chapter.id}>
-                        <h4 style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                          {chapter.title.split(' — ')[0]}
-                        </h4>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <h4 className="chapter-heading">{chapter.title.split(' — ')[0]}</h4>
+                        <div className="chapter-lessons">
                           {chapter.lessons.map(lesson => {
                             const isSelected = activeLesson?.id === lesson.id;
                             const isDone = completedLessons[lesson.id];
                             return (
                               <button
                                 key={lesson.id}
-                                className={`sidebar-link ${isSelected ? 'active' : ''}`}
+                                className={`sidebar-link lesson-link ${isSelected ? 'active' : ''}`}
                                 onClick={() => {
                                   setIsPlacementTestActive(false);
                                   setActiveLesson(lesson);
                                   setMcqAnswerSelected(null);
                                 }}
-                                style={{ 
-                                  textAlign: 'left',
-                                  padding: '8px 12px',
-                                  fontSize: '13px',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'space-between',
-                                  background: isSelected ? 'hsla(263, 90%, 55%, 0.12)' : 'transparent',
-                                  border: 'none',
-                                  cursor: 'pointer',
-                                  width: '100%',
-                                  color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)'
-                                }}
                               >
-                                <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '180px' }}>
-                                  {lesson.title.split(' — ')[1]}
-                                </span>
-                                {isDone && <span style={{ color: 'var(--accent-green)', fontSize: '12px' }}>✓</span>}
+                                <span className="lesson-link-label">{lesson.title.split(' — ')[1]}</span>
+                                {isDone && <Check size={12} className="lesson-done-icon" />}
                               </button>
                             );
                           })}
@@ -727,40 +715,30 @@ function App() {
                 </div>
 
                 {/* Right Content Viewport */}
-                <div className="card-glass" style={{ padding: '32px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+                <div className="card learn-content-pane">
                   {isPlacementTestActive ? (
                     /* RENDER PLACEMENT TEST */
                     <div>
-                      <h2 style={{ fontSize: '28px', marginBottom: '8px' }}>⚡ Unit 0 Diagnostic Placement Test</h2>
-                      <p style={{ color: 'var(--text-secondary)', marginBottom: '32px', fontSize: '14px' }}>
+                      <h2>Unit 0 Diagnostic Placement Test</h2>
+                      <p className="placement-intro">
                         Answer these C++ prerequisite questions. Score <strong>5 / 6</strong> correct to skip Unit 0 and proceed directly to data structures.
                       </p>
 
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', marginBottom: '32px' }}>
+                      <div className="placement-questions">
                         {placementQuestions.map((q, idx) => {
                           const selectedOpt = placementAnswers[q.id];
                           return (
-                            <div key={q.id} style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: '20px' }}>
-                              <h4 style={{ fontSize: '15px', marginBottom: '12px', color: 'var(--text-primary)', fontWeight: '600' }}>
-                                {idx + 1}. {q.question}
-                              </h4>
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                            <div key={q.id} className="placement-question">
+                              <h4 className="placement-question-heading">{idx + 1}. {q.question}</h4>
+                              <div className="placement-question-options">
                                 {q.options.map((opt, optIdx) => {
                                   const isOptionSelected = selectedOpt === optIdx;
-                                  let btnBg = 'hsla(224, 71%, 12%, 0.5)';
-                                  let btnBorder = 'var(--border-subtle)';
-                                  
+                                  let state = '';
                                   if (placementSubmitted) {
-                                    if (optIdx === q.answerIndex) {
-                                      btnBg = 'hsla(142, 70%, 50%, 0.15)';
-                                      btnBorder = 'var(--accent-green)';
-                                    } else if (isOptionSelected) {
-                                      btnBg = 'hsla(340, 100%, 60%, 0.15)';
-                                      btnBorder = 'var(--accent-rose)';
-                                    }
+                                    if (optIdx === q.answerIndex) state = 'correct';
+                                    else if (isOptionSelected) state = 'incorrect';
                                   } else if (isOptionSelected) {
-                                    btnBg = 'hsla(263, 90%, 55%, 0.2)';
-                                    btnBorder = 'var(--accent-primary)';
+                                    state = 'selected';
                                   }
 
                                   return (
@@ -768,17 +746,7 @@ function App() {
                                       key={optIdx}
                                       disabled={placementSubmitted}
                                       onClick={() => setPlacementAnswers(prev => ({ ...prev, [q.id]: optIdx }))}
-                                      style={{
-                                        background: btnBg,
-                                        border: `1px solid ${btnBorder}`,
-                                        borderRadius: '8px',
-                                        padding: '12px 16px',
-                                        color: 'var(--text-primary)',
-                                        textAlign: 'left',
-                                        cursor: placementSubmitted ? 'default' : 'pointer',
-                                        fontSize: '13px',
-                                        transition: 'all 0.2s'
-                                      }}
+                                      className={`quiz-option ${state}`}
                                     >
                                       {opt}
                                     </button>
@@ -786,7 +754,7 @@ function App() {
                                 })}
                               </div>
                               {placementSubmitted && (
-                                <div style={{ marginTop: '12px', fontSize: '13px', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.02)', padding: '10px 14px', borderRadius: '6px' }}>
+                                <div className="placement-explanation">
                                   <strong>Correct Answer: {q.answerLabel}</strong> — {q.explanation}
                                 </div>
                               )}
@@ -796,17 +764,17 @@ function App() {
                       </div>
 
                       {placementSubmitted ? (
-                        <div className="card-glass" style={{ textAlign: 'center', background: 'rgba(255,255,255,0.03)', padding: '24px' }}>
-                          <h3 style={{ fontSize: '20px', marginBottom: '8px' }}>
+                        <div className="card placement-result">
+                          <h3>
                             Diagnostic Score: {Object.values(placementAnswers).filter((ans, idx) => ans === placementQuestions[idx].answerIndex).length} / 6 Correct
                           </h3>
-                          <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '16px' }}>
-                            {Object.values(placementAnswers).filter((ans, idx) => ans === placementQuestions[idx].answerIndex).length >= 5 
-                              ? '🏆 Perfect match! You have verified C++ skills. Skip Unit 0 and proceed straight to Unit 1.' 
-                              : '💡 Recommended: review C++ Foundations lessons before proceeding to avoid syntax blocks.'
+                          <p>
+                            {Object.values(placementAnswers).filter((ans, idx) => ans === placementQuestions[idx].answerIndex).length >= 5
+                              ? 'Strong result — you have verified C++ skills. Skip Unit 0 and proceed straight to Unit 1.'
+                              : 'Recommended: review the C++ Foundations lessons before proceeding, to avoid syntax blocks later.'
                             }
                           </p>
-                          <button 
+                          <button
                             className="btn-secondary"
                             onClick={() => {
                               setPlacementAnswers({});
@@ -817,8 +785,8 @@ function App() {
                           </button>
                         </div>
                       ) : (
-                        <button 
-                          className="btn-primary" 
+                        <button
+                          className="btn-primary btn-block"
                           onClick={() => {
                             if (Object.keys(placementAnswers).length < placementQuestions.length) {
                               alert('Please complete all questions before submitting.');
@@ -826,7 +794,6 @@ function App() {
                             }
                             setPlacementSubmitted(true);
                           }}
-                          style={{ width: '100%' }}
                         >
                           Submit Test
                         </button>
@@ -834,55 +801,34 @@ function App() {
                     </div>
                   ) : activeLesson ? (
                     /* RENDER ACTIVE LESSON */
-                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                      <h2 style={{ fontSize: '28px', marginBottom: '24px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '16px' }}>
-                        {activeLesson.title}
-                      </h2>
-                      
-                      <div className="lesson-body-text" style={{ display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '15px', lineHeight: '1.7', color: '#e2e8f0', flexGrow: 1 }}>
+                    <div className="lesson-view">
+                      <h2 className="lesson-heading">{activeLesson.title}</h2>
+
+                      <div className="prose">
                         {activeLesson.content.map((paragraph, pIdx) => (
                           <div key={pIdx} dangerouslySetInnerHTML={{ __html: paragraph }} />
                         ))}
 
                         {/* RENDER MCQ IF EXISTS */}
                         {activeLesson.mcq && (
-                          <div className="card-glass" style={{ background: 'hsla(224, 71%, 6%, 0.4)', border: '1px solid var(--border-subtle)', padding: '24px', borderRadius: '8px', marginTop: '24px' }}>
-                            <h4 style={{ fontSize: '15px', color: 'var(--accent-cyan)', marginBottom: '16px', marginTop: '0' }}>
-                              ❓ Check Your Understanding
-                            </h4>
-                            <p style={{ fontWeight: '600', marginBottom: '16px', color: 'var(--text-primary)', fontSize: '14px' }}>{activeLesson.mcq.question}</p>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <div className="callout">
+                            <h4 className="callout-header"><HelpCircle size={16} /> Check Your Understanding</h4>
+                            <p className="callout-question">{activeLesson.mcq.question}</p>
+                            <div className="quiz-options">
                               {activeLesson.mcq.options.map((opt, optIdx) => {
                                 const isCorrect = optIdx === activeLesson.mcq!.answerIndex;
                                 const isSelected = mcqAnswerSelected === optIdx;
-                                let optBorder = 'var(--border-subtle)';
-                                let optBg = 'transparent';
-                                
+                                let state = '';
                                 if (mcqAnswerSelected !== null) {
-                                  if (isCorrect) {
-                                    optBorder = 'var(--accent-green)';
-                                    optBg = 'rgba(142, 70, 50, 0.08)';
-                                  } else if (isSelected) {
-                                    optBorder = 'var(--accent-rose)';
-                                    optBg = 'rgba(340, 100, 60, 0.08)';
-                                  }
+                                  if (isCorrect) state = 'correct';
+                                  else if (isSelected) state = 'incorrect';
                                 }
 
                                 return (
                                   <button
                                     key={optIdx}
                                     onClick={() => setMcqAnswerSelected(optIdx)}
-                                    style={{
-                                      background: optBg,
-                                      border: `1px solid ${optBorder}`,
-                                      borderRadius: '6px',
-                                      padding: '10px 14px',
-                                      color: 'var(--text-primary)',
-                                      textAlign: 'left',
-                                      cursor: 'pointer',
-                                      fontSize: '13px',
-                                      transition: 'all 0.2s'
-                                    }}
+                                    className={`quiz-option ${state}`}
                                   >
                                     {opt}
                                   </button>
@@ -890,7 +836,7 @@ function App() {
                               })}
                             </div>
                             {mcqAnswerSelected !== null && (
-                              <div style={{ marginTop: '16px', fontSize: '13px', color: 'var(--text-secondary)', borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
+                              <div className="callout-explanation">
                                 <strong>Explanation:</strong> {activeLesson.mcq.explanation}
                               </div>
                             )}
@@ -899,30 +845,25 @@ function App() {
 
                         {/* RENDER CODE EXERCISE IF EXISTS */}
                         {activeLesson.codeExercise && (
-                          <div className="card-glass" style={{ background: 'hsla(224, 71%, 6%, 0.4)', border: '1px solid var(--border-subtle)', padding: '24px', borderRadius: '8px', marginTop: '24px' }}>
-                            <h4 style={{ fontSize: '15px', color: 'var(--accent-amber)', marginBottom: '12px', marginTop: '0' }}>
-                              💻 Hands-On Exercise
-                            </h4>
-                            <p style={{ fontSize: '14px', color: 'var(--text-primary)', marginBottom: '16px' }}>
-                              {activeLesson.codeExercise.instruction}
-                            </p>
-                            <pre><code style={{ fontSize: '13px' }}>{activeLesson.codeExercise.templateCode}</code></pre>
-                            
-                            <div style={{ marginTop: '16px' }}>
-                              <button 
-                                className="btn-secondary" 
+                          <div className="callout">
+                            <h4 className="callout-header"><Terminal size={16} /> Hands-On Exercise</h4>
+                            <p className="callout-instruction">{activeLesson.codeExercise.instruction}</p>
+                            <pre className="code-block"><code>{activeLesson.codeExercise.templateCode}</code></pre>
+
+                            <div className="exercise-actions">
+                              <button
+                                className="btn-secondary btn-sm"
                                 onClick={() => setRevealedSolutions(prev => ({ ...prev, [activeLesson.id]: !prev[activeLesson.id] }))}
-                                style={{ fontSize: '12px', padding: '6px 12px' }}
                               >
                                 {revealedSolutions[activeLesson.id] ? 'Hide Solution' : 'Reveal Solution'}
                               </button>
                             </div>
 
                             {revealedSolutions[activeLesson.id] && (
-                              <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px solid var(--border-subtle)', paddingTop: '16px' }}>
+                              <div className="exercise-solution">
                                 <strong>Solution Code:</strong>
-                                <pre><code style={{ fontSize: '13px', color: 'var(--accent-green)' }}>{activeLesson.codeExercise.solutionCode}</code></pre>
-                                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+                                <pre className="code-block solution"><code>{activeLesson.codeExercise.solutionCode}</code></pre>
+                                <div className="page-subtitle">
                                   <strong>Concept:</strong> {activeLesson.codeExercise.explanation}
                                 </div>
                               </div>
@@ -932,16 +873,13 @@ function App() {
                       </div>
 
                       {/* LESSON COMPLETE BUTTON */}
-                      <div style={{ marginTop: '40px', borderTop: '1px solid var(--border-subtle)', paddingTop: '20px', display: 'flex', justifyItems: 'center', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                          Unit 0 — Lesson {activeLesson.id}
-                        </span>
+                      <div className="lesson-complete-bar">
+                        <span className="lesson-complete-label">Unit 0 — Lesson {activeLesson.id}</span>
                         <button
-                          className={completedLessons[activeLesson.id] ? 'btn-secondary' : 'btn-primary'}
+                          className={completedLessons[activeLesson.id] ? 'btn-secondary btn-icon' : 'btn-primary btn-icon'}
                           onClick={() => setCompletedLessons(prev => ({ ...prev, [activeLesson.id]: !prev[activeLesson.id] }))}
-                          style={{ padding: '8px 16px', fontSize: '13px' }}
                         >
-                          {completedLessons[activeLesson.id] ? '✓ Completed' : 'Mark Lesson Complete'}
+                          {completedLessons[activeLesson.id] ? (<><Check size={14} /> Completed</>) : 'Mark Lesson Complete'}
                         </button>
                       </div>
                     </div>
@@ -953,29 +891,31 @@ function App() {
             {currentTab === 'tracked' && (
               /* TRACKED PROBLEMS LIST */
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
+                <div className="page-header">
                   <div>
-                    <h1 style={{ fontSize: '36px', margin: '0' }}>Tracked Problems</h1>
-                    <p style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>All questions currently in your Spaced Repetition queue</p>
+                    <h1 className="page-title">Tracked Problems</h1>
+                    <p className="page-subtitle">All questions currently in your Spaced Repetition queue</p>
                   </div>
                 </div>
 
                 {trackedProblems.length === 0 ? (
-                  <div className="card-glass" style={{ textAlign: 'center', padding: '48px' }}>
-                    <Activity size={40} style={{ color: 'var(--text-muted)', marginBottom: '12px' }} />
+                  <div className="card empty-state">
+                    <Activity size={40} className="empty-state-icon" />
                     <h3>No problems tracked yet</h3>
-                    <p style={{ color: 'var(--text-secondary)' }}>Practice a question from the **Sheet** tab to add it to your monitor loop.</p>
+                    <p className="page-subtitle">
+                      Practice a question from the <strong>Sheet</strong> tab to add it to your monitor loop.
+                    </p>
                   </div>
                 ) : (
-                  <div className="card-glass" style={{ padding: '0', overflowX: 'auto' }}>
-                    <table className="problems-table">
+                  <div className="card table-card">
+                    <table className="problems-table tracked-table">
                       <thead>
                         <tr>
-                          <th style={{ width: '30%' }}>Problem Name</th>
-                          <th style={{ width: '20%' }}>Category</th>
-                          <th style={{ width: '15%' }}>Difficulty</th>
-                          <th style={{ width: '15%' }}>Interval</th>
-                          <th style={{ width: '20%' }}>Status / Due Time</th>
+                          <th>Problem Name</th>
+                          <th>Category</th>
+                          <th>Difficulty</th>
+                          <th>Interval</th>
+                          <th>Status / Due Time</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -997,25 +937,22 @@ function App() {
 
                           return (
                             <tr key={p.id}>
-                              <td style={{ fontWeight: '600' }}>
-                                <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => handleStartPractice(p)}>
+                              <td>
+                                <button className="problem-name-link" onClick={() => handleStartPractice(p)}>
                                   {p.title}
-                                </span>
+                                </button>
                               </td>
                               <td>{p.category}</td>
                               <td>
-                                <span className={`tag-badge ${
-                                  p.difficulty === 'Easy' ? 'diff-easy' : 
-                                  p.difficulty === 'Medium' ? 'diff-medium' : 'diff-hard'
-                                }`}>
+                                <span className="tag-badge badge-difficulty" data-difficulty={p.difficulty}>
                                   {p.difficulty}
                                 </span>
                               </td>
-                              <td style={{ fontFamily: 'var(--font-code)', fontSize: '13px' }}>
+                              <td className="cell-mono">
                                 {p.interval_days} {p.interval_days === 1 ? 'day' : 'days'} (Reps: {p.repetition_count})
                               </td>
                               <td>
-                                <span className={`tag-badge ${isOverdue ? 'diff-hard' : 'tag-status'}`}>
+                                <span className="tag-badge badge-status" data-status={isOverdue ? 'due' : p.status}>
                                   {isOverdue ? 'Due Now' : dueMessage}
                                 </span>
                               </td>
@@ -1032,67 +969,59 @@ function App() {
             {currentTab === 'sheet' && (
               /* SHEET VIEW (ALL 250 PROBLEMS) */
               <div>
-                <h1 style={{ fontSize: '36px', marginBottom: '12px' }}>NeetCode 250 Sheet</h1>
-                <p style={{ color: 'var(--text-secondary)', marginBottom: '32px' }}>Practice problems list. Submitting a grade starts active tracking.</p>
+                <div className="sheet-header">
+                  <h1 className="page-title">NeetCode 250 Sheet</h1>
+                  <p className="page-subtitle">Practice problems list. Submitting a grade starts active tracking.</p>
+                </div>
 
                 {Object.entries(getProblemsByCategory()).map(([category, items]) => {
                   const isExpanded = expandedCategories[category];
                   const completedCount = items.filter(i => i.status === 'Mastered').length;
                   const trackedCount = items.filter(i => i.status !== 'Untracked').length;
-                  
+
                   return (
-                    <div key={category} style={{ marginBottom: '16px' }}>
-                      <div className="category-header" onClick={() => toggleCategory(category)}>
+                    <div key={category} className="category-section">
+                      <button className="category-header" onClick={() => toggleCategory(category)}>
                         <h3 className="category-title">
                           {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
                           {category}
                         </h3>
-                        <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: '600' }}>
+                        <span className="category-meta">
                           {trackedCount} / {items.length} Tracked ({completedCount} Mastered)
                         </span>
-                      </div>
+                      </button>
 
                       {isExpanded && (
-                        <div className="card-glass" style={{ padding: '0', overflowX: 'auto', marginBottom: '16px' }}>
-                          <table className="problems-table">
+                        <div className="card table-card category-table-wrap">
+                          <table className="problems-table sheet-table">
                             <thead>
                               <tr>
-                                <th style={{ width: '40%' }}>Problem Name</th>
-                                <th style={{ width: '20%' }}>Difficulty</th>
-                                <th style={{ width: '20%' }}>Status</th>
-                                <th style={{ width: '20%' }}>Actions</th>
+                                <th>Problem Name</th>
+                                <th>Difficulty</th>
+                                <th>Status</th>
+                                <th>Actions</th>
                               </tr>
                             </thead>
                             <tbody>
                               {items.map(p => (
                                 <tr key={p.id}>
-                                  <td style={{ fontWeight: '600' }}>{p.title}</td>
+                                  <td className="cell-strong">{p.title}</td>
                                   <td>
-                                    <span className={`tag-badge ${
-                                      p.difficulty === 'Easy' ? 'diff-easy' : 
-                                      p.difficulty === 'Medium' ? 'diff-medium' : 'diff-hard'
-                                    }`}>
+                                    <span className="tag-badge badge-difficulty" data-difficulty={p.difficulty}>
                                       {p.difficulty}
                                     </span>
                                   </td>
                                   <td>
-                                    <span className={`tag-badge ${
-                                      p.status === 'Untracked' ? 'tag-status' :
-                                      p.status === 'Learning' ? 'diff-medium' :
-                                      p.status === 'Review' ? 'diff-easy' : 'diff-green'
-                                    }`}>
-                                      {p.status}
-                                    </span>
+                                    <span className="tag-badge badge-status" data-status={p.status}>{p.status}</span>
                                   </td>
                                   <td>
-                                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                    <div className="row-actions">
                                       <a href={p.leetcode_url} target="_blank" rel="noreferrer" className="btn-leetcode">
                                         <ExternalLink size={14} />
                                       </a>
-                                      <button 
-                                        className="btn-practice" 
+                                      <button
+                                        className="btn-practice btn-practice-sm"
                                         onClick={() => handleStartPractice(p)}
-                                        style={{ padding: '4px 10px', fontSize: '12px' }}
                                       >
                                         {p.status === 'Untracked' ? 'Practice' : 'Review'}
                                       </button>
