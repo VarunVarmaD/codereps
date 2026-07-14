@@ -5,63 +5,26 @@ import path from 'path';
 
 dotenv.config();
 
-const dbPassword = process.env.SUPABASE_DB_PASSWORD;
-if (!dbPassword) {
-  console.error('❌ Error: SUPABASE_DB_PASSWORD is not set in your .env file.');
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  console.error('❌ Error: DATABASE_URL is not set in your .env file.');
   process.exit(1);
 }
 
-const connectionString = `postgresql://postgres:${dbPassword}@db.qizexxrhvrjdyjzvickl.supabase.co:5432/postgres`;
+const TARGET_SECONDS_BY_DIFFICULTY: Record<string, number> = {
+  Easy: 900,
+  Medium: 1800,
+  Hard: 2700,
+};
 
-const query = `
-  query questionContent($titleSlug: String!) {
-    question(titleSlug: $titleSlug) {
-      content
-    }
-  }
-`;
-
-async function fetchDescription(slug: string): Promise<string> {
-  try {
-    const response = await fetch('https://leetcode.com/graphql', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      },
-      body: JSON.stringify({
-        query,
-        variables: { titleSlug: slug }
-      })
-    });
-    
-    if (!response.ok) {
-      return '';
-    }
-    
-    const result: any = await response.json();
-    return result?.data?.question?.content || '';
-  } catch (err) {
-    return '';
-  }
-}
-
-async function processInBatches<T, R>(items: T[], batchSize: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = [];
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
-    console.log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(items.length / batchSize)} (Problems ${i + 1} to ${Math.min(i + batchSize, items.length)})...`);
-    const batchResults = await Promise.all(batch.map(item => fn(item)));
-    results.push(...batchResults);
-    // Add a small delay between batches to respect rate limits
-    await new Promise(resolve => setTimeout(resolve, 200));
-  }
-  return results;
+function slugify(leetcodeUrl: string, name: string): string {
+  const match = leetcodeUrl.match(/\/problems\/([^/]+)/);
+  return match ? match[1] : name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 }
 
 async function runSeeder() {
   console.log('🌱 Starting NeetCode 250 Seeder...');
-  
+
   const jsonPath = path.join(__dirname, 'neetcode_250.json');
   if (!fs.existsSync(jsonPath)) {
     console.error('❌ Error: neetcode_250.json not found at:', jsonPath);
@@ -77,44 +40,40 @@ async function runSeeder() {
     process.exit(1);
   }
 
-  console.log(`Loaded ${problems.length} problems. Fetching descriptions from LeetCode...`);
+  console.log(`Loaded ${problems.length} problems.`);
 
-  // Batch process fetching descriptions
-  const enrichedProblems = await processInBatches(problems, 20, async (p: any) => {
-    const match = p.leetcode_url.match(/\/problems\/([^/]+)/);
-    const slug = match ? match[1] : p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    const description = await fetchDescription(slug);
-    return {
-      title: p.name,
-      category: p.category,
-      difficulty: p.difficulty,
-      leetcode_url: p.leetcode_url,
-      description: description || 'No description available.'
-    };
-  });
+  // Metadata only — never store LeetCode's problem content (see DECISIONS.md).
+  const mappedProblems = problems.map((p: any) => ({
+    title: p.name,
+    category: p.category,
+    difficulty: p.difficulty,
+    leetcode_url: p.leetcode_url,
+    leetcode_slug: slugify(p.leetcode_url, p.name),
+    tags: [p.category],
+    target_seconds: TARGET_SECONDS_BY_DIFFICULTY[p.difficulty] ?? 1800,
+  }));
 
   console.log('🔌 Connecting to Supabase PostgreSQL database...');
   const client = new Client({ connectionString });
-  
+
   try {
     await client.connect();
     console.log('✅ Connected. Clearing existing problems...');
-    
+
     // Clear existing problems
     await client.query('TRUNCATE public.problems RESTART IDENTITY CASCADE;');
-    
+
     console.log('Writing problems to database...');
-    
-    // Perform bulk inserts
-    for (const p of enrichedProblems) {
+
+    for (const p of mappedProblems) {
       await client.query(
-        `INSERT INTO public.problems (title, category, difficulty, description, leetcode_url)
-         VALUES ($1, $2, $3, $4, $5);`,
-        [p.title, p.category, p.difficulty, p.description, p.leetcode_url]
+        `INSERT INTO public.problems (title, category, difficulty, leetcode_url, leetcode_slug, tags, target_seconds)
+         VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+        [p.title, p.category, p.difficulty, p.leetcode_url, p.leetcode_slug, p.tags, p.target_seconds]
       );
     }
-    
-    console.log('🎉 Seeding successfully completed! All 250 problems loaded.');
+
+    console.log(`🎉 Seeding successfully completed! All ${mappedProblems.length} problems loaded.`);
   } catch (err: any) {
     console.error('❌ Database operation failed:', err.message);
   } finally {

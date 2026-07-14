@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
-import problemsRouter from './routes/problems';
+import eventsRouter from './routes/events.routes';
 
 dotenv.config();
 
@@ -13,7 +13,7 @@ app.use(cors());
 app.use(express.json());
 
 // Mount core endpoints
-app.use('/api/problems', problemsRouter);
+app.use('/api/events', eventsRouter);
 
 // API health endpoint
 app.get('/api/health', (req: Request, res: Response) => {
