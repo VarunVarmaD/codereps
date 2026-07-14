@@ -5,6 +5,7 @@
 import { getProblemMetadata } from './metadata';
 import { trackActiveTime } from './activeTime';
 import { watchDomForVerdict } from './domFallback';
+import { showRatingOverlay } from './ratingOverlay';
 import { mapStatusMsgToVerdict } from '../shared/verdict';
 import type { AttemptEvent } from '../shared/types';
 
@@ -52,6 +53,10 @@ if (!slug) {
       };
       chrome.runtime.sendMessage({ type: 'codereps:attempt', event });
       console.log('[CodeReps] captured attempt:', event);
+
+      showRatingOverlay((quality) => {
+        chrome.runtime.sendMessage({ type: 'codereps:rate', eventId: event.eventId, quality });
+      });
     } catch (err) {
       console.warn('[CodeReps] failed to build attempt event:', err);
     }

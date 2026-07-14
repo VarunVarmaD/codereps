@@ -5,13 +5,13 @@
 // setTimeout, and the queue lives in storage, not memory).
 import { enqueue, dequeueByEventIds, type EventQueue } from './queue';
 import { backoffDelayMs } from './backoff';
+import { API_BASE_URL } from '../shared/config';
 import type { AttemptEvent } from '../shared/types';
 
 const QUEUE_STORAGE_KEY = 'codereps:eventQueue';
 const TOKEN_STORAGE_KEY = 'extensionToken';
 const PERIODIC_ALARM = 'codereps:flush-periodic';
 const RETRY_ALARM = 'codereps:flush-retry';
-const API_BASE_URL = 'http://localhost:5001';
 const MAX_BATCH_SIZE = 100; // matches the backend's eventBatchSchema cap
 
 // Reset on every worker wake — an undercount after a restart just means one
@@ -91,15 +91,52 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message: { type?: string; event?: AttemptEvent }) => {
-  if (message?.type !== 'codereps:attempt' || !message.event) return false;
+// Best-effort, not queued like attempts (see DECISIONS.md): the attempt itself
+// is already safely recorded by the time a rating happens, so a failed rating
+// only loses that one attempt's scheduling effect, not real data. One POST
+// attempt, log on failure, move on.
+async function sendRating(eventId: string, quality: number): Promise<void> {
+  const token = await getToken();
+  if (!token) {
+    console.warn('[CodeReps] no extension token set — open the popup and pair first');
+    return;
+  }
 
-  const event = message.event;
-  void (async () => {
-    const queue = await getQueue();
-    await setQueue(enqueue(queue, event));
-    await flushQueue();
-  })();
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/reviews/${eventId}/rate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ quality }),
+    });
 
-  return false;
-});
+    if (!response.ok) {
+      throw new Error(`POST /api/reviews/${eventId}/rate failed: ${response.status}`);
+    }
+  } catch (err) {
+    console.warn('[CodeReps] rating failed, not retried:', err);
+  }
+}
+
+chrome.runtime.onMessage.addListener(
+  (message: { type?: string; event?: AttemptEvent; eventId?: string; quality?: number }) => {
+    if (message?.type === 'codereps:attempt' && message.event) {
+      const event = message.event;
+      void (async () => {
+        const queue = await getQueue();
+        await setQueue(enqueue(queue, event));
+        await flushQueue();
+      })();
+      return false;
+    }
+
+    if (message?.type === 'codereps:rate' && message.eventId && message.quality) {
+      void sendRating(message.eventId, message.quality);
+      return false;
+    }
+
+    return false;
+  }
+);
