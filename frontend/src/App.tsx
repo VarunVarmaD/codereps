@@ -12,39 +12,64 @@ import {
   Mail,
   Lock,
   RefreshCw,
-  Clock,
-  Pause,
-  HelpCircle,
   Activity,
-  ArrowLeft,
-  Zap,
-  Terminal,
-  Check
+  Plus,
 } from 'lucide-react';
 import { supabase } from './config/supabase';
-import { cppFoundationsChapters, placementQuestions, type Lesson } from './data/cppFoundations';
+import { apiFetch, type AuthContext } from './lib/api';
 
 interface ReviewEntry {
-  grade: number;
-  reviewed_at: string;
+  quality: number;
+  attemptedAt: string;
+  problemTitle?: string;
 }
 
-interface Problem {
+interface QueueItem {
+  id: number;
+  title: string;
+  category: string;
+  difficulty: string;
+  leetcodeUrl: string;
+  leetcodeSlug: string;
+  tags: string[];
+  dueAt: string;
+  easeFactor: number;
+  repetitions: number;
+  intervalDays: number;
+}
+
+interface Stats {
+  dueToday: number;
+  inProgress: number;
+  tracked: number;
+  mastered: number;
+  recentActivity: ReviewEntry[];
+}
+
+interface ProblemSet {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  problem_count: number;
+}
+
+interface SetProblem {
   id: number;
   title: string;
   category: string;
   difficulty: string;
   leetcode_url: string;
-  description?: string;
-  interval_days: number | null;
-  ease_factor: number | null;
-  repetition_count: number | null;
-  due_at: string | null;
-  enabled: boolean | null;
-  status: 'Untracked' | 'Learning' | 'Review' | 'Mastered';
-  due: boolean;
-  days_left: number | null;
-  history?: ReviewEntry[];
+  tracked: boolean;
+}
+
+// Mirrors the SM-2 phase transitions already in the backend's spacedRepetition
+// service (S_new 1/2/3 -> bootstrap intervals, then EF-driven growth) rather
+// than a separately invented status taxonomy.
+function deriveStatus(repetitions: number): 'Learning' | 'Review' | 'Mastered' {
+  if (repetitions >= 3) return 'Mastered';
+  if (repetitions >= 1) return 'Review';
+  return 'Learning';
 }
 
 // Confidence gauge — a radial readout of ease_factor (SM-2's 1.30-2.80 range),
@@ -77,21 +102,26 @@ function ConfidenceGauge({ easeFactor, size = 32 }: { easeFactor: number; size?:
   );
 }
 
-// Rep-history timeline — one dot per past review, oldest to newest, colored by recall grade.
+// Rep-history timeline — one dot per rated attempt, oldest to newest. quality is
+// 1-5 (attempts.quality); data-grade's CSS bands are keyed 0-4, so translate at
+// this boundary rather than touching the CSS (same pattern as the backend's
+// Q = quality - 1 translation for computeNextReview).
 function RepTimeline({ history }: { history: ReviewEntry[] }) {
   if (!history || history.length === 0) {
-    return <p className="rep-timeline-empty">First rep — no review history yet.</p>;
+    return <p className="rep-timeline-empty">No rated attempts yet.</p>;
   }
 
   return (
     <div className="rep-timeline">
-      <span className="readout-label rep-timeline-label">Rep history</span>
+      <span className="readout-label rep-timeline-label">Recent activity</span>
       {history.map((entry, idx) => (
         <span
           key={idx}
           className="rep-dot"
-          data-grade={entry.grade}
-          title={`Grade ${entry.grade} — ${new Date(entry.reviewed_at).toLocaleDateString()}`}
+          data-grade={entry.quality - 1}
+          title={`${entry.problemTitle ? entry.problemTitle + ' — ' : ''}quality ${entry.quality} — ${new Date(
+            entry.attemptedAt
+          ).toLocaleDateString()}`}
         ></span>
       ))}
     </div>
@@ -101,7 +131,7 @@ function RepTimeline({ history }: { history: ReviewEntry[] }) {
 function App() {
   const [session, setSession] = useState<any>(null);
   const [isBypassed, setIsBypassed] = useState(false);
-  const [currentTab, setCurrentTab] = useState<'dashboard' | 'learn' | 'tracked' | 'sheet'>('dashboard');
+  const [currentTab, setCurrentTab] = useState<'dashboard' | 'tracked' | 'sheet'>('dashboard');
 
   // Auth Form State
   const [email, setEmail] = useState('');
@@ -110,31 +140,32 @@ function App() {
   const [authError, setAuthError] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
 
-  // App Data State
-  const [problems, setProblems] = useState<Problem[]>([]);
+  // Today / Tracked data
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [trackedItems, setTrackedItems] = useState<QueueItem[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
-  const [problemsError, setProblemsError] = useState('');
+  const [dataError, setDataError] = useState('');
 
-  // Active Practice State
-  const [activeProblem, setActiveProblem] = useState<Problem | null>(null);
-  const [ratingLoading, setRatingLoading] = useState(false);
-  const [workspaceTab, setWorkspaceTab] = useState<'leetcode' | 'sandbox'>('leetcode');
-
-  // Stopwatch Timer State
-  const [timeElapsed, setTimeElapsed] = useState(0);
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
-
-  // Collapsible categories state (Sheet tab)
+  // Sheet (curated sets) data
+  const [sets, setSets] = useState<ProblemSet[]>([]);
+  const [selectedSetSlug, setSelectedSetSlug] = useState<string | null>(null);
+  const [setProblems, setSetProblems] = useState<SetProblem[]>([]);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
+  const [trackingId, setTrackingId] = useState<number | null>(null);
 
-  // Learn Tab State
-  const [activeLesson, setActiveLesson] = useState<Lesson | null>(cppFoundationsChapters[0].lessons[0]);
-  const [isPlacementTestActive, setIsPlacementTestActive] = useState(false);
-  const [placementAnswers, setPlacementAnswers] = useState<Record<number, number>>({});
-  const [placementSubmitted, setPlacementSubmitted] = useState(false);
-  const [mcqAnswerSelected, setMcqAnswerSelected] = useState<number | null>(null);
-  const [revealedSolutions, setRevealedSolutions] = useState<Record<string, boolean>>({});
-  const [completedLessons, setCompletedLessons] = useState<Record<string, boolean>>({});
+  // Add-a-problem-by-URL form
+  const [addUrl, setAddUrl] = useState('');
+  const [addUrlLoading, setAddUrlLoading] = useState(false);
+  const [addUrlMessage, setAddUrlMessage] = useState('');
+  const [addUrlError, setAddUrlError] = useState('');
+
+  // Connect Extension pairing
+  const [pairingCode, setPairingCode] = useState('');
+  const [pairingExpiresAt, setPairingExpiresAt] = useState<string | null>(null);
+  const [pairingLoading, setPairingLoading] = useState(false);
+
+  const auth: AuthContext = { session, isBypassed };
 
   // Check current session
   useEffect(() => {
@@ -150,45 +181,76 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Fetch problems list from backend
-  const fetchProblems = async () => {
-    if (!session && !isBypassed) return;
+  const fetchQueue = async () => {
+    const response = await apiFetch('/api/queue', auth);
+    if (!response.ok) throw new Error('Failed to fetch due queue');
+    setQueue((await response.json()).items);
+  };
+
+  const fetchTracked = async () => {
+    const response = await apiFetch('/api/queue?scope=all', auth);
+    if (!response.ok) throw new Error('Failed to fetch tracked problems');
+    setTrackedItems((await response.json()).items);
+  };
+
+  const fetchStats = async () => {
+    const response = await apiFetch('/api/stats', auth);
+    if (!response.ok) throw new Error('Failed to fetch stats');
+    setStats(await response.json());
+  };
+
+  const fetchSets = async () => {
+    const response = await apiFetch('/api/sets', auth);
+    if (!response.ok) throw new Error('Failed to fetch problem sets');
+    const data = await response.json();
+    setSets(data.sets);
+    setSelectedSetSlug((prev) => prev ?? data.sets[0]?.slug ?? null);
+  };
+
+  const fetchSetProblems = async (slug: string) => {
+    const response = await apiFetch(`/api/sets/${slug}/problems`, auth);
+    if (!response.ok) throw new Error('Failed to fetch set problems');
+    setSetProblems((await response.json()).problems);
+  };
+
+  const refreshDashboard = async () => {
     setDataLoading(true);
-    setProblemsError('');
+    setDataError('');
     try {
-      const token = isBypassed ? 'development_bypass_token' : session?.access_token;
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/problems`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      if (!response.ok) throw new Error('Failed to fetch problems from database');
-      const data = await response.json();
-      setProblems(data);
+      await Promise.all([fetchQueue(), fetchStats()]);
     } catch (err: any) {
-      setProblemsError(err.message || 'Failed to load problems');
+      setDataError(err.message || 'Failed to load dashboard');
     } finally {
       setDataLoading(false);
     }
   };
 
+  // Fetch whatever the current tab needs — no client-side router, so this
+  // fires whenever the active tab (or auth state) changes.
   useEffect(() => {
-    fetchProblems();
-  }, [session, isBypassed]);
+    if (!session && !isBypassed) return;
+    setDataError('');
+    setDataLoading(true);
 
-  // Stopwatch Timer Effect
+    const load =
+      currentTab === 'dashboard'
+        ? Promise.all([fetchQueue(), fetchStats()])
+        : currentTab === 'tracked'
+        ? fetchTracked()
+        : fetchSets();
+
+    load
+      .catch((err: any) => setDataError(err.message || 'Failed to load data'))
+      .finally(() => setDataLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTab, session, isBypassed]);
+
   useEffect(() => {
-    let interval: any = null;
-    if (isTimerRunning) {
-      interval = setInterval(() => {
-        setTimeElapsed(prev => prev + 1);
-      }, 1000);
-    } else {
-      clearInterval(interval);
+    if (currentTab === 'sheet' && selectedSetSlug) {
+      fetchSetProblems(selectedSetSlug).catch((err: any) => setDataError(err.message || 'Failed to load set'));
     }
-    return () => clearInterval(interval);
-  }, [isTimerRunning]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSetSlug]);
 
   // Auth execution handler
   const handleAuth = async (e: React.FormEvent) => {
@@ -211,89 +273,79 @@ function App() {
     }
   };
 
-  // Development bypass login handler
   const handleBypassLogin = () => {
     setIsBypassed(true);
     setSession(null);
   };
 
-  // Logout handler
   const handleLogout = async () => {
     if (isBypassed) {
       setIsBypassed(false);
     } else {
       await supabase.auth.signOut();
     }
-    setProblems([]);
-    setActiveProblem(null);
+    setQueue([]);
+    setTrackedItems([]);
+    setStats(null);
+    setSets([]);
+    setSetProblems([]);
   };
 
-  // Open single problem practice workspace
-  const handleStartPractice = async (problem: Problem) => {
-    setDataLoading(true);
+  const handleTrackProblem = async (problemId: number) => {
+    setTrackingId(problemId);
     try {
-      const token = isBypassed ? 'development_bypass_token' : session?.access_token;
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/problems/${problem.id}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      if (!response.ok) throw new Error('Failed to retrieve problem description');
-      const detailedProblem = await response.json();
-
-      // Initialize stopwatch and sub-tabs state
-      setTimeElapsed(0);
-      setIsTimerRunning(false);
-      setWorkspaceTab('leetcode');
-      setActiveProblem(detailedProblem);
+      const response = await apiFetch(`/api/problems/${problemId}/track`, auth, { method: 'POST' });
+      if (!response.ok) throw new Error('Failed to track problem');
+      if (selectedSetSlug) await fetchSetProblems(selectedSetSlug);
     } catch (err: any) {
-      alert(err.message || 'Failed to open problem workspace');
+      alert(err.message || 'Failed to track problem');
     } finally {
-      setDataLoading(false);
+      setTrackingId(null);
     }
   };
 
-  // Click handler for opening LeetCode & starting timer
-  const handleOpenLeetCode = () => {
-    setIsTimerRunning(true);
-    window.open(activeProblem?.leetcode_url, '_blank');
-  };
-
-  // Submit SM-2 recall rating
-  const handleSubmitReview = async (grade: number) => {
-    if (!activeProblem) return;
-    setRatingLoading(true);
+  const handleAddByUrl = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddUrlLoading(true);
+    setAddUrlError('');
+    setAddUrlMessage('');
     try {
-      const token = isBypassed ? 'development_bypass_token' : session?.access_token;
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/problems/${activeProblem.id}/review`, {
+      const response = await apiFetch('/api/problems', auth, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ grade, durationSeconds: timeElapsed })
+        body: JSON.stringify({ leetcodeUrl: addUrl.trim() }),
       });
-      if (!response.ok) throw new Error('Failed to save review results');
-
-      // Stop timer
-      setIsTimerRunning(false);
-      setTimeElapsed(0);
-
-      // Reload problems list to refresh dashboard
-      await fetchProblems();
-      setActiveProblem(null);
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed to add problem');
+      }
+      const problem = await response.json();
+      setAddUrlMessage(`Added "${problem.title}" — now tracking it. Check the Tracked tab.`);
+      setAddUrl('');
     } catch (err: any) {
-      alert(err.message || 'Failed to save review grade');
+      setAddUrlError(err.message || 'Failed to add problem');
     } finally {
-      setRatingLoading(false);
+      setAddUrlLoading(false);
     }
   };
 
-  // Group problems by category for Sheet tab
-  const getProblemsByCategory = () => {
-    const groups: Record<string, Problem[]> = {};
-    problems.forEach(p => {
+  const handleGeneratePairingCode = async () => {
+    setPairingLoading(true);
+    try {
+      const response = await apiFetch('/api/pairing-codes', auth, { method: 'POST' });
+      if (!response.ok) throw new Error('Failed to generate pairing code');
+      const data = await response.json();
+      setPairingCode(data.code);
+      setPairingExpiresAt(data.expiresAt);
+    } catch (err: any) {
+      alert(err.message || 'Failed to generate pairing code');
+    } finally {
+      setPairingLoading(false);
+    }
+  };
+
+  const getSetProblemsByCategory = () => {
+    const groups: Record<string, SetProblem[]> = {};
+    setProblems.forEach((p) => {
       if (!groups[p.category]) groups[p.category] = [];
       groups[p.category].push(p);
     });
@@ -301,26 +353,8 @@ function App() {
   };
 
   const toggleCategory = (category: string) => {
-    setExpandedCategories(prev => ({
-      ...prev,
-      [category]: !prev[category]
-    }));
+    setExpandedCategories((prev) => ({ ...prev, [category]: !prev[category] }));
   };
-
-  // Format seconds to MM:SS
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // Calculations for display queues
-  const dueQueue = problems.filter(p => p.due);
-  const trackedProblems = problems.filter(p => p.status !== 'Untracked');
-
-  // Statistics computations
-  const totalMastered = problems.filter(p => p.status === 'Mastered').length;
-  const totalLearning = problems.filter(p => p.status === 'Learning' || p.status === 'Review').length;
 
   const userEmail = isBypassed ? 'developer@codereps.local' : session?.user?.email;
 
@@ -331,8 +365,8 @@ function App() {
         <div className="auth-brand-panel">
           <h1 className="page-title">Codereps</h1>
           <p>
-            A deliberate-practice log for DSA interviews. Track what's due, grade your
-            own recall honestly, and let spaced repetition decide what you practice next.
+            A deliberate-practice log for DSA interviews. Solve on real LeetCode — the browser
+            extension captures it — and let spaced repetition decide what you practice next.
           </p>
         </div>
 
@@ -414,29 +448,43 @@ function App() {
         <nav className="sidebar-nav">
           <button
             className={`sidebar-link ${currentTab === 'dashboard' ? 'active' : ''}`}
-            onClick={() => { setCurrentTab('dashboard'); setActiveProblem(null); }}
+            onClick={() => setCurrentTab('dashboard')}
           >
             <LayoutDashboard size={18} /> Today
           </button>
           <button
-            className={`sidebar-link ${currentTab === 'learn' ? 'active' : ''}`}
-            onClick={() => { setCurrentTab('learn'); setActiveProblem(null); }}
-          >
-            <HelpCircle size={18} /> Learn
-          </button>
-          <button
             className={`sidebar-link ${currentTab === 'tracked' ? 'active' : ''}`}
-            onClick={() => { setCurrentTab('tracked'); setActiveProblem(null); }}
+            onClick={() => setCurrentTab('tracked')}
           >
             <Activity size={18} /> Tracked
           </button>
           <button
             className={`sidebar-link ${currentTab === 'sheet' ? 'active' : ''}`}
-            onClick={() => { setCurrentTab('sheet'); setActiveProblem(null); }}
+            onClick={() => setCurrentTab('sheet')}
           >
             <BookOpen size={18} /> Sheet
           </button>
         </nav>
+
+        <div className="sidebar-extension">
+          {pairingCode ? (
+            <div className="pairing-code-display">
+              <span className="readout-label">Pairing code</span>
+              <span className="readout-value pairing-code-value">{pairingCode}</span>
+              <span className="pairing-code-expiry">
+                Expires {pairingExpiresAt ? new Date(pairingExpiresAt).toLocaleTimeString() : ''}
+              </span>
+            </div>
+          ) : (
+            <button
+              className="btn-secondary btn-block btn-sm"
+              onClick={handleGeneratePairingCode}
+              disabled={pairingLoading}
+            >
+              {pairingLoading ? 'Generating…' : 'Connect Extension'}
+            </button>
+          )}
+        </div>
 
         <div className="sidebar-profile">
           <span className="sidebar-email" title={userEmail || ''}>{userEmail}</span>
@@ -448,596 +496,273 @@ function App() {
 
       {/* Main Content Area */}
       <main className="content-area">
-        {activeProblem ? (
-          /* SPLIT PANE WORKSPACE */
+        {currentTab === 'dashboard' && (
           <div>
-            <div className="workspace-header">
+            <div className="page-header">
               <div>
-                <button className="link-plain" onClick={() => { setActiveProblem(null); setIsTimerRunning(false); }}>
-                  <ArrowLeft size={14} /> Exit Workspace
-                </button>
-                <h2>{activeProblem.title}</h2>
+                <h1 className="page-title">Today Dashboard</h1>
+                <p className="page-subtitle">Your active review items for today</p>
               </div>
-              <div className="workspace-badges">
-                <span className="tag-badge badge-category">{activeProblem.category}</span>
-                <span className="tag-badge badge-difficulty" data-difficulty={activeProblem.difficulty}>
-                  {activeProblem.difficulty}
-                </span>
-                {activeProblem.ease_factor != null && (
-                  <div className="confidence-gauge-wrap">
-                    <ConfidenceGauge easeFactor={activeProblem.ease_factor} size={72} />
-                    <span className="readout-label">Confidence</span>
-                  </div>
-                )}
+              <button className="btn-secondary btn-icon" onClick={refreshDashboard} disabled={dataLoading}>
+                <RefreshCw size={16} className={dataLoading ? 'spin-animation' : ''} />
+              </button>
+            </div>
+
+            <div className="stats-ribbon">
+              <div className="card">
+                <div className="stat-label-row tone-primary">
+                  <Calendar size={18} />
+                  <span>due today</span>
+                </div>
+                <p className="stat-val readout-value tone-primary">{stats?.dueToday ?? 0}</p>
+              </div>
+              <div className="card">
+                <div className="stat-label-row tone-medium">
+                  <RefreshCw size={18} />
+                  <span>in progress</span>
+                </div>
+                <p className="stat-val readout-value tone-medium">{stats?.inProgress ?? 0}</p>
+              </div>
+              <div className="card">
+                <div className="stat-label-row">
+                  <Activity size={18} />
+                  <span>tracked</span>
+                </div>
+                <p className="stat-val readout-value">{stats?.tracked ?? 0}</p>
+              </div>
+              <div className="card">
+                <div className="stat-label-row tone-success">
+                  <CheckCircle2 size={18} />
+                  <span>mastered</span>
+                </div>
+                <p className="stat-val readout-value tone-success">{stats?.mastered ?? 0}</p>
               </div>
             </div>
 
-            <RepTimeline history={activeProblem.history || []} />
+            {dataError && <div className="error-banner">{dataError}</div>}
 
-            <div className="workspace-container">
-              {/* Left Pane - Problem Description */}
-              <div className="workspace-pane">
-                <h3 className="workspace-pane-heading">Problem Description</h3>
-                <div
-                  className="prose"
-                  dangerouslySetInnerHTML={{ __html: activeProblem.description || '<p>No description available.</p>' }}
-                />
+            <h2 className="section-heading">Spaced Repetition Due Queue</h2>
+            {queue.length === 0 ? (
+              <div className="card empty-state">
+                <CheckCircle2 size={40} className="empty-state-icon tone-success" />
+                <h3>All caught up!</h3>
+                <p className="page-subtitle">
+                  Nothing due right now. Go to the <strong>Sheet</strong> tab to pick something new, or
+                  just solve anything on LeetCode — the extension will pick it up.
+                </p>
               </div>
-
-              {/* Right Pane - Practice Session with Workspace Tabs */}
-              <div className="workspace-pane">
-                <div className="workspace-tabs">
-                  <button
-                    className={`workspace-tab ${workspaceTab === 'leetcode' ? 'active' : ''}`}
-                    onClick={() => setWorkspaceTab('leetcode')}
-                  >
-                    Practice on LeetCode
-                  </button>
-                  <button
-                    className={`workspace-tab ${workspaceTab === 'sandbox' ? 'active' : ''}`}
-                    onClick={() => setWorkspaceTab('sandbox')}
-                  >
-                    Do it here <span className="soon-badge">Soon</span>
-                  </button>
-                </div>
-
-                {workspaceTab === 'sandbox' ? (
-                  /* SANDBOX PLACEHOLDER */
-                  <div className="workspace-tab-panel workspace-tab-panel-empty">
-                    <Clock size={40} className="timer-icon" />
-                    <h3>Interactive Code Playground</h3>
-                    <p>
-                      An in-browser code editor and compiler sandbox is currently in progress.
-                      Soon you will be able to write and execute code solutions directly on this screen.
-                    </p>
-                  </div>
-                ) : (
-                  /* LEETCODE PRACTICE VIEW */
-                  <div className="workspace-tab-panel">
-                    <Clock size={48} className={`timer-icon ${isTimerRunning ? 'running' : ''}`} />
-
-                    <div className={`timer-display readout-value ${isTimerRunning ? 'running' : ''}`}>
-                      {formatTime(timeElapsed)}
+            ) : (
+              <div className="problems-grid">
+                {queue.map(p => (
+                  <div key={p.id} className="card problem-card">
+                    <div className="problem-card-header">
+                      <h3 className="problem-title">{p.title}</h3>
+                      <span className="tag-badge badge-difficulty" data-difficulty={p.difficulty}>
+                        {p.difficulty}
+                      </span>
                     </div>
 
-                    <div className="workspace-actions">
-                      <button onClick={handleOpenLeetCode} className="btn-primary btn-icon">
-                        Solve on LeetCode <ExternalLink size={16} />
-                      </button>
-                      {isTimerRunning && (
-                        <button onClick={() => setIsTimerRunning(false)} className="btn-secondary">
-                          <Pause size={16} />
-                        </button>
-                      )}
+                    <div className="tag-container">
+                      <span className="tag-badge badge-category">{p.category}</span>
+                      <span className="tag-badge badge-status" data-status={deriveStatus(p.repetitions)}>
+                        {deriveStatus(p.repetitions)}
+                      </span>
                     </div>
 
-                    <div className="grading-section">
-                      <h4 className="grading-heading">Rate your recall quality</h4>
-                      <div className="grade-buttons">
-                        {[
-                          { val: 0, label: '0', title: 'Blackout', desc: 'No memory' },
-                          { val: 1, label: '1', title: 'Familiar', desc: 'Recognized' },
-                          { val: 2, label: '2', title: 'Struggled', desc: 'Needed hints' },
-                          { val: 3, label: '3', title: 'Solved', desc: 'Correct, rough' },
-                          { val: 4, label: '4', title: 'Fluent', desc: 'Clean, fast' }
-                        ].map(g => (
-                          <button
-                            key={g.val}
-                            className="btn-grade"
-                            onClick={() => handleSubmitReview(g.val)}
-                            disabled={ratingLoading}
-                          >
-                            <span>{g.label}</span>
-                            <span className="btn-grade-title">{g.title}</span>
-                            <span className="btn-grade-desc">{g.desc}</span>
-                          </button>
-                        ))}
+                    <div className="card-footer">
+                      <div className="card-footer-left">
+                        <ConfidenceGauge easeFactor={p.easeFactor} />
+                        <a href={p.leetcodeUrl} target="_blank" rel="noreferrer" className="btn-leetcode">
+                          Open on LeetCode <ExternalLink size={14} />
+                        </a>
                       </div>
                     </div>
                   </div>
-                )}
+                ))}
               </div>
-            </div>
+            )}
+
+            {stats && stats.recentActivity.length > 0 && (
+              <div style={{ marginTop: 40 }}>
+                <RepTimeline history={stats.recentActivity} />
+              </div>
+            )}
           </div>
-        ) : (
-          /* NORMAL TAB SWITCHING */
+        )}
+
+        {currentTab === 'tracked' && (
           <div>
-            {currentTab === 'dashboard' && (
-              /* TODAY DASHBOARD VIEW */
+            <div className="page-header">
               <div>
-                <div className="page-header">
-                  <div>
-                    <h1 className="page-title">Today Dashboard</h1>
-                    <p className="page-subtitle">Your active review items for today</p>
-                  </div>
-                  <button className="btn-secondary btn-icon" onClick={fetchProblems} disabled={dataLoading}>
-                    <RefreshCw size={16} className={dataLoading ? 'spin-animation' : ''} />
-                  </button>
-                </div>
+                <h1 className="page-title">Tracked Problems</h1>
+                <p className="page-subtitle">Everything currently in your Spaced Repetition loop</p>
+              </div>
+            </div>
 
-                {/* Stats Ribbon */}
-                <div className="stats-ribbon">
-                  <div className="card">
-                    <div className="stat-label-row tone-primary">
-                      <Calendar size={18} />
-                      <span>due today</span>
-                    </div>
-                    <p className="stat-val readout-value tone-primary">{dueQueue.length}</p>
-                  </div>
-                  <div className="card">
-                    <div className="stat-label-row tone-medium">
-                      <RefreshCw size={18} />
-                      <span>in progress</span>
-                    </div>
-                    <p className="stat-val readout-value tone-medium">{totalLearning}</p>
-                  </div>
-                  <div className="card">
-                    <div className="stat-label-row">
-                      <Activity size={18} />
-                      <span>tracked</span>
-                    </div>
-                    <p className="stat-val readout-value">{trackedProblems.length}</p>
-                  </div>
-                  <div className="card">
-                    <div className="stat-label-row tone-success">
-                      <CheckCircle2 size={18} />
-                      <span>mastered</span>
-                    </div>
-                    <p className="stat-val readout-value tone-success">{totalMastered}</p>
-                  </div>
-                </div>
+            {dataError && <div className="error-banner">{dataError}</div>}
 
-                {problemsError && <div className="error-banner">{problemsError}</div>}
+            {trackedItems.length === 0 ? (
+              <div className="card empty-state">
+                <Activity size={40} className="empty-state-icon" />
+                <h3>No problems tracked yet</h3>
+                <p className="page-subtitle">
+                  Track a problem from the <strong>Sheet</strong> tab, or just solve something on LeetCode —
+                  the extension starts tracking it automatically.
+                </p>
+              </div>
+            ) : (
+              <div className="card table-card">
+                <table className="problems-table tracked-table">
+                  <thead>
+                    <tr>
+                      <th>Problem Name</th>
+                      <th>Category</th>
+                      <th>Difficulty</th>
+                      <th>Interval</th>
+                      <th>Status / Due</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {trackedItems.map(p => {
+                      const isOverdue = new Date(p.dueAt).getTime() <= Date.now();
+                      const status = deriveStatus(p.repetitions);
 
-                {/* Active Review Problems List */}
-                <h2 className="section-heading">Spaced Repetition Due Queue</h2>
-                {dueQueue.length === 0 ? (
-                  <div className="card empty-state">
-                    <CheckCircle2 size={40} className="empty-state-icon tone-success" />
-                    <h3>All caught up!</h3>
-                    <p className="page-subtitle">
-                      You have zero problems due for review today. Go to the <strong>Sheet</strong> tab to practice new topics.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="problems-grid">
-                    {dueQueue.map(p => (
-                      <div key={p.id} className="card problem-card">
-                        <div className="problem-card-header">
-                          <h3 className="problem-title">{p.title}</h3>
-                          <span className="tag-badge badge-difficulty" data-difficulty={p.difficulty}>
-                            {p.difficulty}
-                          </span>
-                        </div>
-
-                        <div className="tag-container">
-                          <span className="tag-badge badge-category">{p.category}</span>
-                          <span className="tag-badge badge-status" data-status={p.status}>{p.status}</span>
-                        </div>
-
-                        <div className="card-footer">
-                          <div className="card-footer-left">
-                            {p.ease_factor != null && <ConfidenceGauge easeFactor={p.ease_factor} />}
-                            <a href={p.leetcode_url} target="_blank" rel="noreferrer" className="btn-leetcode">
-                              LeetCode Link <ExternalLink size={14} />
+                      return (
+                        <tr key={p.id}>
+                          <td>
+                            <a href={p.leetcodeUrl} target="_blank" rel="noreferrer" className="problem-name-link">
+                              {p.title}
                             </a>
-                          </div>
-                          <button className="btn-practice" onClick={() => handleStartPractice(p)}>
-                            Practice <Play size={12} fill="white" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {currentTab === 'learn' && (
-              /* INTERACTIVE LEARNING HUB (UNIT 0) */
-              <div className="learn-layout">
-                {/* Left Navigation Sidebar */}
-                <div className="card learn-nav">
-                  <h3 className="learn-nav-heading">Unit 0 — C++ Foundations</h3>
-                  <p className="learn-nav-subheading">Language prerequisites &amp; diagnostic test</p>
-
-                  {/* Progress bar */}
-                  <div className="progress-bar-track">
-                    <div
-                      className="progress-bar-fill"
-                      style={{
-                        width: `${(Object.keys(completedLessons).length / cppFoundationsChapters.reduce((acc, c) => acc + c.lessons.length, 0)) * 100}%`
-                      }}
-                    ></div>
-                  </div>
-
-                  <div className="learn-nav-list">
-                    {/* Placement Test Button */}
-                    <button
-                      className={`sidebar-link placement-cta ${isPlacementTestActive ? 'active' : ''}`}
-                      onClick={() => {
-                        setIsPlacementTestActive(true);
-                        setActiveLesson(null);
-                        setMcqAnswerSelected(null);
-                      }}
-                    >
-                      <span className="icon-label"><Zap size={14} /> Placement Test</span>
-                      {placementSubmitted && <span className="done-badge">Done</span>}
-                    </button>
-
-                    {/* Chapters List */}
-                    {cppFoundationsChapters.map(chapter => (
-                      <div key={chapter.id}>
-                        <h4 className="chapter-heading">{chapter.title.split(' — ')[0]}</h4>
-                        <div className="chapter-lessons">
-                          {chapter.lessons.map(lesson => {
-                            const isSelected = activeLesson?.id === lesson.id;
-                            const isDone = completedLessons[lesson.id];
-                            return (
-                              <button
-                                key={lesson.id}
-                                className={`sidebar-link lesson-link ${isSelected ? 'active' : ''}`}
-                                onClick={() => {
-                                  setIsPlacementTestActive(false);
-                                  setActiveLesson(lesson);
-                                  setMcqAnswerSelected(null);
-                                }}
-                              >
-                                <span className="lesson-link-label">{lesson.title.split(' — ')[1]}</span>
-                                {isDone && <Check size={12} className="lesson-done-icon" />}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Right Content Viewport */}
-                <div className="card learn-content-pane">
-                  {isPlacementTestActive ? (
-                    /* RENDER PLACEMENT TEST */
-                    <div>
-                      <h2>Unit 0 Diagnostic Placement Test</h2>
-                      <p className="placement-intro">
-                        Answer these C++ prerequisite questions. Score <strong>5 / 6</strong> correct to skip Unit 0 and proceed directly to data structures.
-                      </p>
-
-                      <div className="placement-questions">
-                        {placementQuestions.map((q, idx) => {
-                          const selectedOpt = placementAnswers[q.id];
-                          return (
-                            <div key={q.id} className="placement-question">
-                              <h4 className="placement-question-heading">{idx + 1}. {q.question}</h4>
-                              <div className="placement-question-options">
-                                {q.options.map((opt, optIdx) => {
-                                  const isOptionSelected = selectedOpt === optIdx;
-                                  let state = '';
-                                  if (placementSubmitted) {
-                                    if (optIdx === q.answerIndex) state = 'correct';
-                                    else if (isOptionSelected) state = 'incorrect';
-                                  } else if (isOptionSelected) {
-                                    state = 'selected';
-                                  }
-
-                                  return (
-                                    <button
-                                      key={optIdx}
-                                      disabled={placementSubmitted}
-                                      onClick={() => setPlacementAnswers(prev => ({ ...prev, [q.id]: optIdx }))}
-                                      className={`quiz-option ${state}`}
-                                    >
-                                      {opt}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                              {placementSubmitted && (
-                                <div className="placement-explanation">
-                                  <strong>Correct Answer: {q.answerLabel}</strong> — {q.explanation}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {placementSubmitted ? (
-                        <div className="card placement-result">
-                          <h3>
-                            Diagnostic Score: {Object.values(placementAnswers).filter((ans, idx) => ans === placementQuestions[idx].answerIndex).length} / 6 Correct
-                          </h3>
-                          <p>
-                            {Object.values(placementAnswers).filter((ans, idx) => ans === placementQuestions[idx].answerIndex).length >= 5
-                              ? 'Strong result — you have verified C++ skills. Skip Unit 0 and proceed straight to Unit 1.'
-                              : 'Recommended: review the C++ Foundations lessons before proceeding, to avoid syntax blocks later.'
-                            }
-                          </p>
-                          <button
-                            className="btn-secondary"
-                            onClick={() => {
-                              setPlacementAnswers({});
-                              setPlacementSubmitted(false);
-                            }}
-                          >
-                            Retake Diagnostic Test
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          className="btn-primary btn-block"
-                          onClick={() => {
-                            if (Object.keys(placementAnswers).length < placementQuestions.length) {
-                              alert('Please complete all questions before submitting.');
-                              return;
-                            }
-                            setPlacementSubmitted(true);
-                          }}
-                        >
-                          Submit Test
-                        </button>
-                      )}
-                    </div>
-                  ) : activeLesson ? (
-                    /* RENDER ACTIVE LESSON */
-                    <div className="lesson-view">
-                      <h2 className="lesson-heading">{activeLesson.title}</h2>
-
-                      <div className="prose">
-                        {activeLesson.content.map((paragraph, pIdx) => (
-                          <div key={pIdx} dangerouslySetInnerHTML={{ __html: paragraph }} />
-                        ))}
-
-                        {/* RENDER MCQ IF EXISTS */}
-                        {activeLesson.mcq && (
-                          <div className="callout">
-                            <h4 className="callout-header"><HelpCircle size={16} /> Check Your Understanding</h4>
-                            <p className="callout-question">{activeLesson.mcq.question}</p>
-                            <div className="quiz-options">
-                              {activeLesson.mcq.options.map((opt, optIdx) => {
-                                const isCorrect = optIdx === activeLesson.mcq!.answerIndex;
-                                const isSelected = mcqAnswerSelected === optIdx;
-                                let state = '';
-                                if (mcqAnswerSelected !== null) {
-                                  if (isCorrect) state = 'correct';
-                                  else if (isSelected) state = 'incorrect';
-                                }
-
-                                return (
-                                  <button
-                                    key={optIdx}
-                                    onClick={() => setMcqAnswerSelected(optIdx)}
-                                    className={`quiz-option ${state}`}
-                                  >
-                                    {opt}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                            {mcqAnswerSelected !== null && (
-                              <div className="callout-explanation">
-                                <strong>Explanation:</strong> {activeLesson.mcq.explanation}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* RENDER CODE EXERCISE IF EXISTS */}
-                        {activeLesson.codeExercise && (
-                          <div className="callout">
-                            <h4 className="callout-header"><Terminal size={16} /> Hands-On Exercise</h4>
-                            <p className="callout-instruction">{activeLesson.codeExercise.instruction}</p>
-                            <pre className="code-block"><code>{activeLesson.codeExercise.templateCode}</code></pre>
-
-                            <div className="exercise-actions">
-                              <button
-                                className="btn-secondary btn-sm"
-                                onClick={() => setRevealedSolutions(prev => ({ ...prev, [activeLesson.id]: !prev[activeLesson.id] }))}
-                              >
-                                {revealedSolutions[activeLesson.id] ? 'Hide Solution' : 'Reveal Solution'}
-                              </button>
-                            </div>
-
-                            {revealedSolutions[activeLesson.id] && (
-                              <div className="exercise-solution">
-                                <strong>Solution Code:</strong>
-                                <pre className="code-block solution"><code>{activeLesson.codeExercise.solutionCode}</code></pre>
-                                <div className="page-subtitle">
-                                  <strong>Concept:</strong> {activeLesson.codeExercise.explanation}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* LESSON COMPLETE BUTTON */}
-                      <div className="lesson-complete-bar">
-                        <span className="lesson-complete-label">Unit 0 — Lesson {activeLesson.id}</span>
-                        <button
-                          className={completedLessons[activeLesson.id] ? 'btn-secondary btn-icon' : 'btn-primary btn-icon'}
-                          onClick={() => setCompletedLessons(prev => ({ ...prev, [activeLesson.id]: !prev[activeLesson.id] }))}
-                        >
-                          {completedLessons[activeLesson.id] ? (<><Check size={14} /> Completed</>) : 'Mark Lesson Complete'}
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            )}
-
-            {currentTab === 'tracked' && (
-              /* TRACKED PROBLEMS LIST */
-              <div>
-                <div className="page-header">
-                  <div>
-                    <h1 className="page-title">Tracked Problems</h1>
-                    <p className="page-subtitle">All questions currently in your Spaced Repetition queue</p>
-                  </div>
-                </div>
-
-                {trackedProblems.length === 0 ? (
-                  <div className="card empty-state">
-                    <Activity size={40} className="empty-state-icon" />
-                    <h3>No problems tracked yet</h3>
-                    <p className="page-subtitle">
-                      Practice a question from the <strong>Sheet</strong> tab to add it to your monitor loop.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="card table-card">
-                    <table className="problems-table tracked-table">
-                      <thead>
-                        <tr>
-                          <th>Problem Name</th>
-                          <th>Category</th>
-                          <th>Difficulty</th>
-                          <th>Interval</th>
-                          <th>Status / Due Time</th>
+                          </td>
+                          <td>{p.category}</td>
+                          <td>
+                            <span className="tag-badge badge-difficulty" data-difficulty={p.difficulty}>
+                              {p.difficulty}
+                            </span>
+                          </td>
+                          <td className="cell-mono">
+                            {p.intervalDays} {p.intervalDays === 1 ? 'day' : 'days'} (Reps: {p.repetitions})
+                          </td>
+                          <td>
+                            <span className="tag-badge badge-status" data-status={isOverdue ? 'due' : status}>
+                              {isOverdue ? 'Due Now' : `Due ${new Date(p.dueAt).toLocaleDateString()}`}
+                            </span>
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {trackedProblems.map(p => {
-                          const dueInDays = p.days_left;
-                          let dueMessage = 'Due Now';
-                          let isOverdue = p.due;
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
 
-                          if (!isOverdue && dueInDays !== null) {
-                            if (dueInDays <= 0) {
-                              dueMessage = 'Due Now';
-                              isOverdue = true;
-                            } else if (dueInDays === 1) {
-                              dueMessage = 'In 1 day';
-                            } else {
-                              dueMessage = `In ${dueInDays} days`;
-                            }
-                          }
+        {currentTab === 'sheet' && (
+          <div>
+            <div className="sheet-header">
+              <h1 className="page-title">Curated Sets</h1>
+              <p className="page-subtitle">Pick a set to browse, or add any LeetCode problem directly.</p>
+            </div>
 
-                          return (
+            <form className="add-problem-form" onSubmit={handleAddByUrl}>
+              <input
+                type="url"
+                value={addUrl}
+                onChange={e => setAddUrl(e.target.value)}
+                placeholder="https://leetcode.com/problems/..."
+                required
+                className="auth-input add-problem-input"
+              />
+              <button type="submit" className="btn-primary btn-icon" disabled={addUrlLoading}>
+                {addUrlLoading ? 'Adding…' : <>Add <Plus size={16} /></>}
+              </button>
+            </form>
+            {addUrlMessage && <p className="add-problem-message success">{addUrlMessage}</p>}
+            {addUrlError && <div className="error-banner">{addUrlError}</div>}
+
+            {sets.length > 1 && (
+              <div className="set-selector">
+                {sets.map(s => (
+                  <button
+                    key={s.id}
+                    className={`sidebar-link set-selector-item ${selectedSetSlug === s.slug ? 'active' : ''}`}
+                    onClick={() => setSelectedSetSlug(s.slug)}
+                  >
+                    {s.name} <span className="category-meta">{s.problem_count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {dataError && <div className="error-banner">{dataError}</div>}
+
+            {Object.entries(getSetProblemsByCategory()).map(([category, items]) => {
+              const isExpanded = expandedCategories[category];
+              const trackedCount = items.filter(i => i.tracked).length;
+
+              return (
+                <div key={category} className="category-section">
+                  <button className="category-header" onClick={() => toggleCategory(category)}>
+                    <h3 className="category-title">
+                      {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                      {category}
+                    </h3>
+                    <span className="category-meta">
+                      {trackedCount} / {items.length} Tracked
+                    </span>
+                  </button>
+
+                  {isExpanded && (
+                    <div className="card table-card category-table-wrap">
+                      <table className="problems-table sheet-table">
+                        <thead>
+                          <tr>
+                            <th>Problem Name</th>
+                            <th>Difficulty</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {items.map(p => (
                             <tr key={p.id}>
-                              <td>
-                                <button className="problem-name-link" onClick={() => handleStartPractice(p)}>
-                                  {p.title}
-                                </button>
-                              </td>
-                              <td>{p.category}</td>
+                              <td className="cell-strong">{p.title}</td>
                               <td>
                                 <span className="tag-badge badge-difficulty" data-difficulty={p.difficulty}>
                                   {p.difficulty}
                                 </span>
                               </td>
-                              <td className="cell-mono">
-                                {p.interval_days} {p.interval_days === 1 ? 'day' : 'days'} (Reps: {p.repetition_count})
-                              </td>
                               <td>
-                                <span className="tag-badge badge-status" data-status={isOverdue ? 'due' : p.status}>
-                                  {isOverdue ? 'Due Now' : dueMessage}
+                                <span className="tag-badge badge-status" data-status={p.tracked ? 'Review' : 'Untracked'}>
+                                  {p.tracked ? 'Tracked' : 'Untracked'}
                                 </span>
                               </td>
+                              <td>
+                                <div className="row-actions">
+                                  <a href={p.leetcode_url} target="_blank" rel="noreferrer" className="btn-leetcode">
+                                    <ExternalLink size={14} />
+                                  </a>
+                                  {!p.tracked && (
+                                    <button
+                                      className="btn-practice btn-practice-sm"
+                                      onClick={() => handleTrackProblem(p.id)}
+                                      disabled={trackingId === p.id}
+                                    >
+                                      {trackingId === p.id ? 'Tracking…' : 'Track'}
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
                             </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {currentTab === 'sheet' && (
-              /* SHEET VIEW (ALL 250 PROBLEMS) */
-              <div>
-                <div className="sheet-header">
-                  <h1 className="page-title">NeetCode 250 Sheet</h1>
-                  <p className="page-subtitle">Practice problems list. Submitting a grade starts active tracking.</p>
-                </div>
-
-                {Object.entries(getProblemsByCategory()).map(([category, items]) => {
-                  const isExpanded = expandedCategories[category];
-                  const completedCount = items.filter(i => i.status === 'Mastered').length;
-                  const trackedCount = items.filter(i => i.status !== 'Untracked').length;
-
-                  return (
-                    <div key={category} className="category-section">
-                      <button className="category-header" onClick={() => toggleCategory(category)}>
-                        <h3 className="category-title">
-                          {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                          {category}
-                        </h3>
-                        <span className="category-meta">
-                          {trackedCount} / {items.length} Tracked ({completedCount} Mastered)
-                        </span>
-                      </button>
-
-                      {isExpanded && (
-                        <div className="card table-card category-table-wrap">
-                          <table className="problems-table sheet-table">
-                            <thead>
-                              <tr>
-                                <th>Problem Name</th>
-                                <th>Difficulty</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {items.map(p => (
-                                <tr key={p.id}>
-                                  <td className="cell-strong">{p.title}</td>
-                                  <td>
-                                    <span className="tag-badge badge-difficulty" data-difficulty={p.difficulty}>
-                                      {p.difficulty}
-                                    </span>
-                                  </td>
-                                  <td>
-                                    <span className="tag-badge badge-status" data-status={p.status}>{p.status}</span>
-                                  </td>
-                                  <td>
-                                    <div className="row-actions">
-                                      <a href={p.leetcode_url} target="_blank" rel="noreferrer" className="btn-leetcode">
-                                        <ExternalLink size={14} />
-                                      </a>
-                                      <button
-                                        className="btn-practice btn-practice-sm"
-                                        onClick={() => handleStartPractice(p)}
-                                      >
-                                        {p.status === 'Untracked' ? 'Practice' : 'Review'}
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </main>
