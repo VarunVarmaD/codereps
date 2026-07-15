@@ -13,12 +13,47 @@ export function Popup() {
   const [status, setStatus] = useState<'idle' | 'pairing' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
 
+  const [backfillStatus, setBackfillStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [backfillMessage, setBackfillMessage] = useState('');
+
   useEffect(() => {
     chrome.storage.local.get(TOKEN_STORAGE_KEY).then((stored) => {
       const existing = stored[TOKEN_STORAGE_KEY];
       if (typeof existing === 'string') setToken(existing);
     });
   }, []);
+
+  // Progress/completion messages arrive from content/backfill.ts via the
+  // background — this popup only sees them while it's open, which is fine,
+  // it's just a progress readout, not the source of truth (the background
+  // still does the actual POST /api/events regardless of whether anyone's
+  // watching).
+  useEffect(() => {
+    function handleMessage(message: { type?: string; fetched?: number; events?: unknown[]; message?: string }) {
+      if (message?.type === 'codereps:backfill-progress') {
+        setBackfillStatus('running');
+        setBackfillMessage(`Fetched ${message.fetched} submissions…`);
+      } else if (message?.type === 'codereps:backfill-complete') {
+        setBackfillStatus('done');
+        setBackfillMessage(`Imported ${message.events?.length ?? 0} attempts.`);
+      } else if (message?.type === 'codereps:backfill-error') {
+        setBackfillStatus('error');
+        setBackfillMessage(message.message ?? 'Backfill failed');
+      }
+    }
+    chrome.runtime.onMessage.addListener(handleMessage);
+    return () => chrome.runtime.onMessage.removeListener(handleMessage);
+  }, []);
+
+  async function handleBackfill() {
+    setBackfillStatus('running');
+    setBackfillMessage('Starting…');
+    const result = await chrome.runtime.sendMessage({ type: 'codereps:start-backfill' });
+    if (!result?.ok) {
+      setBackfillStatus('error');
+      setBackfillMessage(result?.error ?? 'Could not start backfill');
+    }
+  }
 
   async function handlePair() {
     setStatus('pairing');
@@ -59,9 +94,21 @@ export function Popup() {
       {token ? (
         <>
           <p style={{ color: '#2e7d32' }}>Paired — capturing your LeetCode practice.</p>
-          <button onClick={handleUnpair} style={{ width: '100%' }}>
+          <button onClick={handleUnpair} style={{ width: '100%', marginBottom: 8 }}>
             Unpair
           </button>
+          <button
+            onClick={handleBackfill}
+            disabled={backfillStatus === 'running'}
+            style={{ width: '100%' }}
+          >
+            {backfillStatus === 'running' ? 'Backfilling…' : 'Backfill History'}
+          </button>
+          {backfillMessage && (
+            <p style={{ color: backfillStatus === 'error' ? '#c62828' : '#555', fontSize: 12 }}>
+              {backfillMessage}
+            </p>
+          )}
         </>
       ) : (
         <>

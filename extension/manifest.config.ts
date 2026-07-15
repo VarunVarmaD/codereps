@@ -24,6 +24,14 @@ export default defineManifest({
       js: ['src/content/index.ts'],
       run_at: 'document_idle',
     },
+    // Broader than the two above on purpose — the opt-in history backfill (M4)
+    // can be triggered from any leetcode.com page, not just a problem page, so
+    // this listener needs to be present wherever an open leetcode.com tab is.
+    {
+      matches: ['https://leetcode.com/*'],
+      js: ['src/content/backfill.ts'],
+      run_at: 'document_idle',
+    },
   ],
   background: {
     service_worker: 'src/background/service-worker.ts',
@@ -33,5 +41,10 @@ export default defineManifest({
     default_popup: 'src/popup/index.html',
   },
   permissions: ['storage', 'alarms'],
-  host_permissions: ['http://localhost:5001/*'],
+  // leetcode.com is here (not just in content_scripts.matches) because
+  // chrome.tabs.query({ url }) needs an explicit host permission to see tab
+  // URLs at all — content-script match patterns grant injection, not tab
+  // visibility. Without this, the backfill trigger's tab lookup silently
+  // returns tabs with no url property and never matches.
+  host_permissions: ['http://localhost:5001/*', 'https://leetcode.com/*'],
 });

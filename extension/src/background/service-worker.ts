@@ -120,8 +120,60 @@ async function sendRating(eventId: string, quality: number): Promise<void> {
   }
 }
 
+// Kicks off the opt-in history backfill: a popup click can't fetch
+// leetcode.com's submissionList itself (a chrome-extension:// origin fetch
+// wouldn't carry leetcode.com's session cookies), so this finds an open
+// leetcode.com tab and asks its content script (content/backfill.ts, matched
+// broadly — see manifest.config.ts) to run the fetch loop instead.
+async function startBackfill(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const tabs = await chrome.tabs.query({ url: 'https://leetcode.com/*' });
+  const tab = tabs[0];
+  if (!tab?.id) {
+    return { ok: false, error: 'Open a leetcode.com tab first, then try again.' };
+  }
+
+  await chrome.tabs.sendMessage(tab.id, { type: 'codereps:run-backfill' });
+  return { ok: true };
+}
+
+// The content script sends the whole backfilled batch back in one message;
+// this POSTs it to the backend in chunks of 100 (the eventBatchSchema cap),
+// reusing the same endpoint and idempotency as the live-capture queue.
+async function submitBackfillEvents(events: AttemptEvent[]): Promise<void> {
+  const token = await getToken();
+  if (!token) {
+    console.warn('[CodeReps] no extension token set — open the popup and pair first');
+    return;
+  }
+
+  for (let i = 0; i < events.length; i += MAX_BATCH_SIZE) {
+    const chunk = events.slice(i, i + MAX_BATCH_SIZE);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ events: chunk }),
+      });
+      if (!response.ok) {
+        throw new Error(`POST /api/events (backfill) failed: ${response.status}`);
+      }
+    } catch (err) {
+      console.warn('[CodeReps] backfill submission chunk failed:', err);
+    }
+  }
+}
+
 chrome.runtime.onMessage.addListener(
-  (message: { type?: string; event?: AttemptEvent; eventId?: string; quality?: number }) => {
+  (message: {
+    type?: string;
+    event?: AttemptEvent;
+    events?: AttemptEvent[];
+    eventId?: string;
+    quality?: number;
+  }, _sender, sendResponse) => {
     if (message?.type === 'codereps:attempt' && message.event) {
       const event = message.event;
       void (async () => {
@@ -134,6 +186,16 @@ chrome.runtime.onMessage.addListener(
 
     if (message?.type === 'codereps:rate' && message.eventId && message.quality) {
       void sendRating(message.eventId, message.quality);
+      return false;
+    }
+
+    if (message?.type === 'codereps:start-backfill') {
+      void startBackfill().then(sendResponse);
+      return true; // keep the message channel open for the async sendResponse
+    }
+
+    if (message?.type === 'codereps:backfill-complete' && message.events) {
+      void submitBackfillEvents(message.events);
       return false;
     }
 
