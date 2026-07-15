@@ -14,6 +14,8 @@ import {
   RefreshCw,
   Activity,
   Plus,
+  Target,
+  BarChart3,
 } from 'lucide-react';
 import { supabase } from './config/supabase';
 import { apiFetch, type AuthContext } from './lib/api';
@@ -44,6 +46,8 @@ interface Stats {
   tracked: number;
   mastered: number;
   recentActivity: ReviewEntry[];
+  byDifficulty: { easy: number; medium: number; hard: number };
+  accuracy: { accepted: number; total: number } | null;
 }
 
 interface ProblemSet {
@@ -536,6 +540,28 @@ function App() {
                   <span>mastered</span>
                 </div>
                 <p className="stat-val readout-value tone-success">{stats?.mastered ?? 0}</p>
+              </div>
+              <div className="card">
+                <div className="stat-label-row">
+                  <Target size={18} />
+                  <span>accuracy (30d)</span>
+                </div>
+                <p className="stat-val readout-value">
+                  {stats?.accuracy
+                    ? `${Math.round((stats.accuracy.accepted / stats.accuracy.total) * 100)}%`
+                    : '—'}
+                </p>
+              </div>
+              <div className="card">
+                <div className="stat-label-row">
+                  <BarChart3 size={18} />
+                  <span>by difficulty</span>
+                </div>
+                <div className="stat-difficulty-row readout-value">
+                  <span className="tone-success" title="Easy">{stats?.byDifficulty.easy ?? 0}</span>
+                  <span className="tone-medium" title="Medium">{stats?.byDifficulty.medium ?? 0}</span>
+                  <span className="tone-danger" title="Hard">{stats?.byDifficulty.hard ?? 0}</span>
+                </div>
               </div>
             </div>
 

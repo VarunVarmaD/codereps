@@ -402,6 +402,15 @@ h1, h2, h3, h4 {
 .tone-primary { color: var(--accent-primary); }
 .tone-medium { color: var(--diff-medium); }
 .tone-success { color: var(--accent-success); }
+.tone-danger { color: var(--accent-danger); }
+
+/* Difficulty-breakdown stat chip (Today tab stats-ribbon) */
+.stat-difficulty-row {
+  display: flex;
+  gap: 12px;
+  font-size: 24px;
+  margin: 4px 0 0;
+}
 
 /* Problems Grid Layout */
 .problems-grid {
