@@ -26,4 +26,5 @@ export interface AttemptEvent {
   submissionCount: number;
   quality?: number | null; // 1-5, filled in by the post-submission popup (M3)
   attemptedAt: string; // ISO timestamp
+  isBackfilled?: boolean; // true for events from the history backfill (M4)
 }
