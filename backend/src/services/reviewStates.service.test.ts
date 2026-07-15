@@ -89,4 +89,49 @@ describe('getStats', () => {
       await deleteReviewStateRow(problemId);
     }
   });
+
+  it('byDifficulty counts a tracked Easy problem in the easy bucket only', async () => {
+    const problemId = await getTestProblemId('longest-common-prefix'); // Easy
+    const before = await getStats(TEST_USER_ID);
+    await upsertReviewStateRow(problemId, 1, new Date());
+    try {
+      const after = await getStats(TEST_USER_ID);
+      expect(after.byDifficulty.easy).toBe(before.byDifficulty.easy + 1);
+      expect(after.byDifficulty.medium).toBe(before.byDifficulty.medium);
+      expect(after.byDifficulty.hard).toBe(before.byDifficulty.hard);
+    } finally {
+      await deleteReviewStateRow(problemId);
+    }
+  });
+
+  it('accuracy counts only attempts from the last 30 days', async () => {
+    const problemId = await getTestProblemId('valid-anagram');
+    const before = await getStats(TEST_USER_ID);
+
+    const recentEventId = '11111111-1111-1111-1111-111111111111';
+    const oldEventId = '22222222-2222-2222-2222-222222222222';
+    await pool.query(
+      `INSERT INTO public.attempts (event_id, user_id, problem_id, verdict, active_seconds, submission_count, attempted_at)
+       VALUES ($1, $2, $3, 'accepted', 300, 1, NOW())
+       ON CONFLICT (event_id) DO NOTHING;`,
+      [recentEventId, TEST_USER_ID, problemId]
+    );
+    await pool.query(
+      `INSERT INTO public.attempts (event_id, user_id, problem_id, verdict, active_seconds, submission_count, attempted_at)
+       VALUES ($1, $2, $3, 'wrong_answer', 300, 1, NOW() - INTERVAL '45 days')
+       ON CONFLICT (event_id) DO NOTHING;`,
+      [oldEventId, TEST_USER_ID, problemId]
+    );
+
+    try {
+      const after = await getStats(TEST_USER_ID);
+      expect(after.accuracy).not.toBeNull();
+      expect(after.accuracy!.total).toBe((before.accuracy?.total ?? 0) + 1); // only the recent one counts
+      expect(after.accuracy!.accepted).toBe((before.accuracy?.accepted ?? 0) + 1);
+    } finally {
+      await pool.query(`DELETE FROM public.attempts WHERE event_id = ANY($1::uuid[]);`, [
+        [recentEventId, oldEventId],
+      ]);
+    }
+  });
 });

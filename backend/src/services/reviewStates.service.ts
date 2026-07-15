@@ -109,6 +109,8 @@ export interface Stats {
   tracked: number;
   mastered: number;
   recentActivity: { quality: number; attemptedAt: string; problemTitle: string }[];
+  byDifficulty: { easy: number; medium: number; hard: number };
+  accuracy: { accepted: number; total: number } | null;
 }
 
 // Buckets mirror the SM-2 phase transitions already in spacedRepetition.service.ts
@@ -137,6 +139,34 @@ export async function getStats(userId: string): Promise<Stats> {
     [userId]
   );
 
+  const difficultyResult = await pool.query(
+    `SELECT p.difficulty, COUNT(*)::int AS count
+     FROM public.review_states rs
+     JOIN public.problems p ON p.id = rs.problem_id
+     WHERE rs.user_id = $1
+     GROUP BY p.difficulty;`,
+    [userId]
+  );
+
+  const accuracyResult = await pool.query(
+    `SELECT
+       COUNT(*) FILTER (WHERE verdict = 'accepted') AS accepted,
+       COUNT(*) AS total
+     FROM public.attempts
+     WHERE user_id = $1 AND attempted_at >= NOW() - INTERVAL '30 days';`,
+    [userId]
+  );
+
+  const byDifficulty: Stats['byDifficulty'] = { easy: 0, medium: 0, hard: 0 };
+  for (const r of difficultyResult.rows) {
+    const key: string = r.difficulty?.toLowerCase();
+    if (key === 'easy' || key === 'medium' || key === 'hard') byDifficulty[key] = r.count;
+  }
+
+  const accuracyRow = accuracyResult.rows[0];
+  const accuracyTotal = parseInt(accuracyRow.total, 10);
+  const accuracy = accuracyTotal === 0 ? null : { accepted: parseInt(accuracyRow.accepted, 10), total: accuracyTotal };
+
   const row = bucketResult.rows[0];
   return {
     dueToday: parseInt(row.due_today, 10),
@@ -148,5 +178,7 @@ export async function getStats(userId: string): Promise<Stats> {
       attemptedAt: r.attempted_at,
       problemTitle: r.title,
     })),
+    byDifficulty,
+    accuracy,
   };
 }
