@@ -13,6 +13,7 @@ export const attemptEventSchema = z.object({
   submissionCount: z.number().int().min(0),
   quality: z.number().int().min(1).max(5).nullable().optional(),
   attemptedAt: z.string().datetime(),
+  isBackfilled: z.boolean().optional().default(false),
 });
 
 export const eventBatchSchema = z.object({
