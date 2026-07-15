@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:firefox": "TARGET_BROWSER=firefox vite build",
+    "lint:firefox": "web-ext lint -s dist-firefox",
+    "run:firefox": "web-ext run -s dist-firefox",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -18,9 +21,12 @@
     "@types/chrome": "^0.0.287",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/webextension-polyfill": "^0.12.5",
     "@vitejs/plugin-react": "^6.0.3",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "web-ext": "^10.5.0",
+    "webextension-polyfill": "^0.12.0"
   }
 }

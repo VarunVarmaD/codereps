@@ -5,6 +5,10 @@
 // history via LeetCode's own submissionList query (same-origin fetch, carries
 // the page's session cookies — this can only run here, never from the
 // backend) and reports results back to the background.
+//
+// Uses browser.* (webextension-polyfill), not chrome.* — see
+// background/service-worker.ts's header comment for why.
+import browser from 'webextension-polyfill';
 import { getProblemMetadata } from './metadata';
 import { mapStatusMsgToVerdict } from '../shared/verdict';
 import { backfillEventId } from '../shared/uuidv5';
@@ -114,24 +118,25 @@ async function buildAttemptEvents(submissions: RawSubmission[]): Promise<Attempt
   return events;
 }
 
-chrome.runtime.onMessage.addListener((message: { type?: string }) => {
-  if (message?.type !== 'codereps:run-backfill') return false;
+browser.runtime.onMessage.addListener((raw: unknown) => {
+  const message = raw as { type?: string };
+  if (message?.type !== 'codereps:run-backfill') return undefined;
 
   void (async () => {
     try {
       const submissions = await fetchAllSubmissions((fetched) => {
-        chrome.runtime.sendMessage({ type: 'codereps:backfill-progress', fetched });
+        browser.runtime.sendMessage({ type: 'codereps:backfill-progress', fetched });
       });
 
       const events = await buildAttemptEvents(submissions);
-      chrome.runtime.sendMessage({ type: 'codereps:backfill-complete', events });
+      browser.runtime.sendMessage({ type: 'codereps:backfill-complete', events });
     } catch (err) {
-      chrome.runtime.sendMessage({
+      browser.runtime.sendMessage({
         type: 'codereps:backfill-error',
         message: err instanceof Error ? err.message : 'Backfill failed',
       });
     }
   })();
 
-  return false;
+  return undefined;
 });

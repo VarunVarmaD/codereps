@@ -3,6 +3,7 @@ node_modules/
 
 # Production Build Output
 dist/
+dist-firefox/
 build/
 
 # Environment Files

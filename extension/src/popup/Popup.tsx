@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import browser from 'webextension-polyfill';
 import { API_BASE_URL } from '../shared/config';
 
 const TOKEN_STORAGE_KEY = 'extensionToken';
@@ -17,7 +18,7 @@ export function Popup() {
   const [backfillMessage, setBackfillMessage] = useState('');
 
   useEffect(() => {
-    chrome.storage.local.get(TOKEN_STORAGE_KEY).then((stored) => {
+    browser.storage.local.get(TOKEN_STORAGE_KEY).then((stored) => {
       const existing = stored[TOKEN_STORAGE_KEY];
       if (typeof existing === 'string') setToken(existing);
     });
@@ -29,7 +30,8 @@ export function Popup() {
   // still does the actual POST /api/events regardless of whether anyone's
   // watching).
   useEffect(() => {
-    function handleMessage(message: { type?: string; fetched?: number; events?: unknown[]; message?: string }) {
+    function handleMessage(raw: unknown) {
+      const message = raw as { type?: string; fetched?: number; events?: unknown[]; message?: string };
       if (message?.type === 'codereps:backfill-progress') {
         setBackfillStatus('running');
         setBackfillMessage(`Fetched ${message.fetched} submissions…`);
@@ -41,14 +43,17 @@ export function Popup() {
         setBackfillMessage(message.message ?? 'Backfill failed');
       }
     }
-    chrome.runtime.onMessage.addListener(handleMessage);
-    return () => chrome.runtime.onMessage.removeListener(handleMessage);
+    browser.runtime.onMessage.addListener(handleMessage);
+    return () => browser.runtime.onMessage.removeListener(handleMessage);
   }, []);
 
   async function handleBackfill() {
     setBackfillStatus('running');
     setBackfillMessage('Starting…');
-    const result = await chrome.runtime.sendMessage({ type: 'codereps:start-backfill' });
+    const result = (await browser.runtime.sendMessage({ type: 'codereps:start-backfill' })) as
+      | { ok: true }
+      | { ok: false; error: string }
+      | undefined;
     if (!result?.ok) {
       setBackfillStatus('error');
       setBackfillMessage(result?.error ?? 'Could not start backfill');
@@ -72,7 +77,7 @@ export function Popup() {
       }
 
       const body = (await response.json()) as { token: string };
-      await chrome.storage.local.set({ [TOKEN_STORAGE_KEY]: body.token });
+      await browser.storage.local.set({ [TOKEN_STORAGE_KEY]: body.token });
       setToken(body.token);
       setStatus('idle');
     } catch (err) {
@@ -82,7 +87,7 @@ export function Popup() {
   }
 
   async function handleUnpair() {
-    await chrome.storage.local.remove(TOKEN_STORAGE_KEY);
+    await browser.storage.local.remove(TOKEN_STORAGE_KEY);
     setToken(null);
     setCode('');
     setStatus('idle');

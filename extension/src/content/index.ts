@@ -2,6 +2,7 @@
 // verdict from either the MAIN-world network patch or the DOM fallback,
 // whichever fires first for a given attempt, and turns it into a complete
 // AttemptEvent for the background service worker to queue and send.
+import browser from 'webextension-polyfill';
 import { getProblemMetadata } from './metadata';
 import { trackActiveTime } from './activeTime';
 import { watchDomForVerdict } from './domFallback';
@@ -51,11 +52,11 @@ if (!slug) {
         quality: null,
         attemptedAt: new Date().toISOString(),
       };
-      chrome.runtime.sendMessage({ type: 'codereps:attempt', event });
+      browser.runtime.sendMessage({ type: 'codereps:attempt', event });
       console.log('[CodeReps] captured attempt:', event);
 
       showRatingOverlay((quality) => {
-        chrome.runtime.sendMessage({ type: 'codereps:rate', eventId: event.eventId, quality });
+        browser.runtime.sendMessage({ type: 'codereps:rate', eventId: event.eventId, quality });
       });
     } catch (err) {
       console.warn('[CodeReps] failed to build attempt event:', err);
