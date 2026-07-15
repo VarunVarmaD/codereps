@@ -16,6 +16,7 @@ import {
   Plus,
   Target,
   BarChart3,
+  ArrowLeft,
 } from 'lucide-react';
 import { supabase } from './config/supabase';
 import { apiFetch, type AuthContext } from './lib/api';
@@ -208,7 +209,6 @@ function App() {
     if (!response.ok) throw new Error('Failed to fetch problem sets');
     const data = await response.json();
     setSets(data.sets);
-    setSelectedSetSlug((prev) => prev ?? data.sets[0]?.slug ?? null);
   };
 
   const fetchSetProblems = async (slug: string) => {
@@ -707,88 +707,101 @@ function App() {
             {addUrlMessage && <p className="add-problem-message success">{addUrlMessage}</p>}
             {addUrlError && <div className="error-banner">{addUrlError}</div>}
 
-            {sets.length > 1 && (
-              <div className="set-selector">
+            {dataError && <div className="error-banner">{dataError}</div>}
+
+            {!selectedSetSlug ? (
+              /* SET CARDS — pick a set before browsing its problems */
+              <div className="problems-grid">
                 {sets.map(s => (
                   <button
                     key={s.id}
-                    className={`sidebar-link set-selector-item ${selectedSetSlug === s.slug ? 'active' : ''}`}
+                    className="card problem-card set-card"
                     onClick={() => setSelectedSetSlug(s.slug)}
                   >
-                    {s.name} <span className="category-meta">{s.problem_count}</span>
+                    <div className="problem-card-header">
+                      <h3 className="problem-title">{s.name}</h3>
+                    </div>
+                    {s.description && <p className="page-subtitle">{s.description}</p>}
+                    <div className="card-footer">
+                      <span className="tag-badge badge-category">{s.problem_count} problems</span>
+                    </div>
                   </button>
                 ))}
               </div>
-            )}
+            ) : (
+              <div>
+                <button className="link-plain set-back-link" onClick={() => setSelectedSetSlug(null)}>
+                  <ArrowLeft size={14} /> Back to Sets
+                </button>
 
-            {dataError && <div className="error-banner">{dataError}</div>}
+                {Object.entries(getSetProblemsByCategory()).map(([category, items]) => {
+                  const isExpanded = expandedCategories[category];
+                  const trackedCount = items.filter(i => i.tracked).length;
 
-            {Object.entries(getSetProblemsByCategory()).map(([category, items]) => {
-              const isExpanded = expandedCategories[category];
-              const trackedCount = items.filter(i => i.tracked).length;
+                  return (
+                    <div key={category} className="category-section">
+                      <button className="category-header" onClick={() => toggleCategory(category)}>
+                        <h3 className="category-title">
+                          {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                          {category}
+                        </h3>
+                        <span className="category-meta">
+                          {trackedCount} / {items.length} Tracked
+                        </span>
+                      </button>
 
-              return (
-                <div key={category} className="category-section">
-                  <button className="category-header" onClick={() => toggleCategory(category)}>
-                    <h3 className="category-title">
-                      {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                      {category}
-                    </h3>
-                    <span className="category-meta">
-                      {trackedCount} / {items.length} Tracked
-                    </span>
-                  </button>
-
-                  {isExpanded && (
-                    <div className="card table-card category-table-wrap">
-                      <table className="problems-table sheet-table">
-                        <thead>
-                          <tr>
-                            <th>Problem Name</th>
-                            <th>Difficulty</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {items.map(p => (
-                            <tr key={p.id}>
-                              <td className="cell-strong">{p.title}</td>
-                              <td>
-                                <span className="tag-badge badge-difficulty" data-difficulty={p.difficulty}>
-                                  {p.difficulty}
-                                </span>
-                              </td>
-                              <td>
-                                <span className="tag-badge badge-status" data-status={p.tracked ? 'Review' : 'Untracked'}>
-                                  {p.tracked ? 'Tracked' : 'Untracked'}
-                                </span>
-                              </td>
-                              <td>
-                                <div className="row-actions">
-                                  <a href={p.leetcode_url} target="_blank" rel="noreferrer" className="btn-leetcode">
-                                    <ExternalLink size={14} />
-                                  </a>
-                                  {!p.tracked && (
-                                    <button
-                                      className="btn-practice btn-practice-sm"
-                                      onClick={() => handleTrackProblem(p.id)}
-                                      disabled={trackingId === p.id}
-                                    >
-                                      {trackingId === p.id ? 'Tracking…' : 'Track'}
-                                    </button>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                      {isExpanded && (
+                        <div className="card table-card category-table-wrap">
+                          <table className="problems-table sheet-table">
+                            <thead>
+                              <tr>
+                                <th>Problem Name</th>
+                                <th>Difficulty</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {items.map(p => (
+                                <tr key={p.id}>
+                                  <td className="cell-strong">{p.title}</td>
+                                  <td>
+                                    <span className="tag-badge badge-difficulty" data-difficulty={p.difficulty}>
+                                      {p.difficulty}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <span className="tag-badge badge-status" data-status={p.tracked ? 'Review' : 'Untracked'}>
+                                      {p.tracked ? 'Tracked' : 'Untracked'}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <div className="row-actions">
+                                      <a href={p.leetcode_url} target="_blank" rel="noreferrer" className="btn-leetcode">
+                                        <ExternalLink size={14} />
+                                      </a>
+                                      {!p.tracked && (
+                                        <button
+                                          className="btn-practice btn-practice-sm"
+                                          onClick={() => handleTrackProblem(p.id)}
+                                          disabled={trackingId === p.id}
+                                        >
+                                          {trackingId === p.id ? 'Tracking…' : 'Track'}
+                                        </button>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </main>

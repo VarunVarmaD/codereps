@@ -426,6 +426,21 @@ h1, h2, h3, h4 {
   box-sizing: border-box;
 }
 
+/* Set-selection cards (Sheet tab) reuse .card/.problem-card but render as a
+   <button> for clickability — reset the button-element defaults so it still
+   looks like a card. */
+.set-card {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+}
+
+.set-back-link {
+  margin-bottom: 24px;
+}
+
 .problem-card-header {
   display: flex;
   justify-content: space-between;
@@ -919,19 +934,6 @@ h1, h2, h3, h4 {
 
 .add-problem-message.success {
   color: var(--accent-success);
-}
-
-/* Set selector (Sheet tab) */
-.set-selector {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 24px;
-}
-
-.set-selector-item {
-  width: auto;
-  display: inline-flex;
-  gap: 8px;
 }
 
 /* "Connect Extension" pairing UI (sidebar) */
