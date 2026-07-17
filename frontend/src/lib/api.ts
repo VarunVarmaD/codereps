@@ -7,7 +7,12 @@ export interface AuthContext {
   isBypassed: boolean;
 }
 
-const API_URL = import.meta.env.VITE_API_URL;
+// Falls back to same-origin ('') rather than the literal string "undefined" —
+// vercel.json's rewrites already proxy /api/* to the backend service on the
+// same domain in production, so no env var is required there. Local dev sets
+// VITE_API_URL=http://localhost:5001 explicitly (frontend/.env) since the two
+// dev servers run on different ports.
+const API_URL = import.meta.env.VITE_API_URL ?? '';
 
 export async function apiFetch(path: string, auth: AuthContext, init: RequestInit = {}): Promise<Response> {
   const token = auth.isBypassed ? 'development_bypass_token' : auth.session?.access_token;
