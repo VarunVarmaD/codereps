@@ -17,6 +17,7 @@ import {
   Target,
   BarChart3,
   ArrowLeft,
+  X,
 } from 'lucide-react';
 import { supabase } from './config/supabase';
 import { apiFetch, type AuthContext } from './lib/api';
@@ -133,6 +134,32 @@ function RepTimeline({ history }: { history: ReviewEntry[] }) {
   );
 }
 
+// Manual rating — for anyone not using the extension, this is the only path
+// that ever calls the scheduler. Five compact buttons plus a cancel; used on
+// both the Today due-queue cards and the Tracked table.
+function RatingButtons({
+  onRate,
+  onCancel,
+  disabled,
+}: {
+  onRate: (quality: number) => void;
+  onCancel: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="rate-prompt">
+      {[1, 2, 3, 4, 5].map((q) => (
+        <button key={q} className="rate-button" onClick={() => onRate(q)} disabled={disabled}>
+          {q}
+        </button>
+      ))}
+      <button className="rate-cancel" onClick={onCancel} disabled={disabled} aria-label="Cancel rating">
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
 function App() {
   const [session, setSession] = useState<any>(null);
   const [isBypassed, setIsBypassed] = useState(false);
@@ -158,6 +185,12 @@ function App() {
   const [setProblems, setSetProblems] = useState<SetProblem[]>([]);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const [trackingId, setTrackingId] = useState<number | null>(null);
+
+  // Manual rating (Today + Tracked) — activeRatingId is which card/row has the
+  // 1-5 picker open, submittingRatingId disables it mid-request (same pattern
+  // as trackingId above).
+  const [activeRatingId, setActiveRatingId] = useState<number | null>(null);
+  const [submittingRatingId, setSubmittingRatingId] = useState<number | null>(null);
 
   // Add-a-problem-by-URL form
   const [addUrl, setAddUrl] = useState('');
@@ -305,6 +338,30 @@ function App() {
       alert(err.message || 'Failed to track problem');
     } finally {
       setTrackingId(null);
+    }
+  };
+
+  const handleManualRate = async (problemId: number, quality: number) => {
+    setSubmittingRatingId(problemId);
+    try {
+      const response = await apiFetch(`/api/problems/${problemId}/rate`, auth, {
+        method: 'POST',
+        body: JSON.stringify({ quality }),
+      });
+      if (!response.ok) throw new Error('Failed to submit rating');
+      setActiveRatingId(null);
+      // The rated problem's due_at always moves into the future (computeNextReview
+      // clamps intervalDays >= 1), so it naturally drops off today's due list —
+      // just refetch whichever view is showing it.
+      if (currentTab === 'dashboard') {
+        await Promise.all([fetchQueue(), fetchStats()]);
+      } else if (currentTab === 'tracked') {
+        await fetchTracked();
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to submit rating');
+    } finally {
+      setSubmittingRatingId(null);
     }
   };
 
@@ -602,6 +659,17 @@ function App() {
                           Open on LeetCode <ExternalLink size={14} />
                         </a>
                       </div>
+                      {activeRatingId === p.id ? (
+                        <RatingButtons
+                          onRate={(quality) => handleManualRate(p.id, quality)}
+                          onCancel={() => setActiveRatingId(null)}
+                          disabled={submittingRatingId === p.id}
+                        />
+                      ) : (
+                        <button className="btn-secondary btn-sm" onClick={() => setActiveRatingId(p.id)}>
+                          Rate
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -646,6 +714,7 @@ function App() {
                       <th>Difficulty</th>
                       <th>Interval</th>
                       <th>Status / Due</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -673,6 +742,19 @@ function App() {
                             <span className="tag-badge badge-status" data-status={isOverdue ? 'due' : status}>
                               {isOverdue ? 'Due Now' : `Due ${new Date(p.dueAt).toLocaleDateString()}`}
                             </span>
+                          </td>
+                          <td>
+                            {activeRatingId === p.id ? (
+                              <RatingButtons
+                                onRate={(quality) => handleManualRate(p.id, quality)}
+                                onCancel={() => setActiveRatingId(null)}
+                                disabled={submittingRatingId === p.id}
+                              />
+                            ) : (
+                              <button className="btn-secondary btn-sm" onClick={() => setActiveRatingId(p.id)}>
+                                Rate
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );

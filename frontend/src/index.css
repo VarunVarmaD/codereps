@@ -578,6 +578,62 @@ h1, h2, h3, h4 {
   font-size: 12px;
 }
 
+/* Manual rating (Today card-footer + Tracked table Actions column) — the only
+   path into the scheduler for anyone not using the extension. */
+.rate-prompt {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rate-button {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-family: var(--font-code);
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.rate-button:hover:not(:disabled) {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: white;
+}
+
+.rate-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.rate-cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.rate-cancel:hover:not(:disabled) {
+  color: var(--accent-danger);
+}
+
+.rate-cancel:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* Curriculum Collapse Panels */
 .sheet-header {
   margin-bottom: 32px;
@@ -656,11 +712,12 @@ h1, h2, h3, h4 {
   background: var(--bg-elevated);
 }
 
-.tracked-table th:nth-child(1) { width: 30%; }
-.tracked-table th:nth-child(2) { width: 20%; }
-.tracked-table th:nth-child(3) { width: 15%; }
+.tracked-table th:nth-child(1) { width: 25%; }
+.tracked-table th:nth-child(2) { width: 16%; }
+.tracked-table th:nth-child(3) { width: 13%; }
 .tracked-table th:nth-child(4) { width: 15%; }
-.tracked-table th:nth-child(5) { width: 20%; }
+.tracked-table th:nth-child(5) { width: 16%; }
+.tracked-table th:nth-child(6) { width: 15%; }
 
 .sheet-table th:nth-child(1) { width: 40%; }
 .sheet-table th:nth-child(2) { width: 20%; }
