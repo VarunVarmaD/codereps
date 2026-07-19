@@ -18,6 +18,7 @@ import {
   ArrowLeft,
   X,
 } from 'lucide-react';
+import { Analytics } from '@vercel/analytics/react';
 import { supabase } from './config/supabase';
 import { apiFetch, type AuthContext } from './lib/api';
 
@@ -889,6 +890,7 @@ function App() {
           </div>
         )}
       </main>
+      <Analytics />
     </div>
   );
 }
