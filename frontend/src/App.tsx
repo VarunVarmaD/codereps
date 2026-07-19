@@ -8,7 +8,6 @@ import {
   ChevronDown,
   LogOut,
   ExternalLink,
-  Play,
   Mail,
   Lock,
   RefreshCw,
@@ -162,7 +161,6 @@ function RatingButtons({
 
 function App() {
   const [session, setSession] = useState<any>(null);
-  const [isBypassed, setIsBypassed] = useState(false);
   const [currentTab, setCurrentTab] = useState<'dashboard' | 'tracked' | 'sheet'>('dashboard');
 
   // Auth Form State
@@ -203,7 +201,7 @@ function App() {
   const [pairingExpiresAt, setPairingExpiresAt] = useState<string | null>(null);
   const [pairingLoading, setPairingLoading] = useState(false);
 
-  const auth: AuthContext = { session, isBypassed };
+  const auth: AuthContext = { session };
 
   // Check current session
   useEffect(() => {
@@ -213,7 +211,6 @@ function App() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) setIsBypassed(false);
     });
 
     return () => subscription.unsubscribe();
@@ -265,7 +262,7 @@ function App() {
   // Fetch whatever the current tab needs — no client-side router, so this
   // fires whenever the active tab (or auth state) changes.
   useEffect(() => {
-    if (!session && !isBypassed) return;
+    if (!session) return;
     setDataError('');
     setDataLoading(true);
 
@@ -280,7 +277,7 @@ function App() {
       .catch((err: any) => setDataError(err.message || 'Failed to load data'))
       .finally(() => setDataLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTab, session, isBypassed]);
+  }, [currentTab, session]);
 
   useEffect(() => {
     if (currentTab === 'sheet' && selectedSetSlug) {
@@ -310,17 +307,16 @@ function App() {
     }
   };
 
-  const handleBypassLogin = () => {
-    setIsBypassed(true);
-    setSession(null);
+  const handleGoogleSignIn = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin },
+    });
+    if (error) setAuthError(error.message);
   };
 
   const handleLogout = async () => {
-    if (isBypassed) {
-      setIsBypassed(false);
-    } else {
-      await supabase.auth.signOut();
-    }
+    await supabase.auth.signOut();
     setQueue([]);
     setTrackedItems([]);
     setStats(null);
@@ -417,10 +413,10 @@ function App() {
     setExpandedCategories((prev) => ({ ...prev, [category]: !prev[category] }));
   };
 
-  const userEmail = isBypassed ? 'developer@codereps.local' : session?.user?.email;
+  const userEmail = session?.user?.email;
 
   // Render Login page if not authenticated
-  if (!session && !isBypassed) {
+  if (!session) {
     return (
       <div className="auth-layout">
         <div className="auth-brand-panel">
@@ -484,12 +480,18 @@ function App() {
 
             <div className="auth-divider">
               <hr />
-              <span>dev sandbox</span>
+              <span>or continue with</span>
               <hr />
             </div>
 
-            <button type="button" className="btn-secondary btn-block btn-icon" onClick={handleBypassLogin}>
-              <Play size={16} /> Instant Developer Bypass
+            <button type="button" className="btn-secondary btn-block btn-icon" onClick={handleGoogleSignIn}>
+              <svg width="16" height="16" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+                <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
+                <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
+                <path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>
+                <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+              </svg>
+              Continue with Google
             </button>
           </div>
         </div>
